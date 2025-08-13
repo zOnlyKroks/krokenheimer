@@ -1,15 +1,18 @@
 {
   // Visit https://aka.ms/tsconfig to read more about this file
-  "compilerOptions": {
+  "compilerOptions":
+{
   "rootDir": "./src",
   "outDir": "./dist",
   "module": "nodenext",
   "target": "esnext",
   "lib": ["esnext"],
   "types": ["node"],
+
   "sourceMap": true,
   "declaration": true,
   "declarationMap": true,
+
   "strict": true,
   "jsx": "react-jsx",
   "verbatimModuleSyntax": true,
@@ -17,7 +20,6 @@
   "noUncheckedSideEffectImports": true,
   "moduleDetection": "force",
   "skipLibCheck": true,
-  "allowImportingTsExtensions": true,
   "noEmit": false
 }
   }
