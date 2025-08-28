@@ -1,6 +1,6 @@
 import { Client, GatewayIntentBits, Message } from "discord.js";
 import type { BotPlugin, BotCommand, BotConfig } from "../types/index.ts";
-import { Logger } from "./util/logger.ts";
+import { Logger } from "./util/logger.js";
 
 export class ExtensibleBot {
   private client: Client;

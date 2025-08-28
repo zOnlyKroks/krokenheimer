@@ -1,19 +1,25 @@
 FROM node:22-alpine
 
-# Set working directory
+RUN apk add --no-cache \
+    python3 \
+    make \
+    g++ \
+    cairo-dev \
+    pango-dev \
+    giflib-dev \
+    jpeg-dev \
+    libpng-dev \
+    pkgconfig \
+    bash
+
 WORKDIR /app
 
-# Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+RUN npm install --production
 
-# Copy the rest of the code
 COPY . .
-
 
 RUN npm run build
 
-# Command to run your bot
-CMD ["node", "index.js"]
+CMD ["node", "dist/index.js"]

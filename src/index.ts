@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
-import { ExtensibleBot } from "./core/Bot.ts";
-import { GifPlugin } from "./plugins/GifPlugin.ts";
-import { CorePlugin } from "./plugins/CorePlugin.ts";
+import { ExtensibleBot } from "./core/Bot.js";
+import { GifPlugin } from "./plugins/GifPlugin.js";
+import { CorePlugin } from "./plugins/CorePlugin.js";
 import type { BotConfig } from "./types/index.ts";
 
 dotenv.config();

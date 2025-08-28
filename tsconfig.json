@@ -1,41 +1,29 @@
 {
   "compilerOptions": {
-    /* Base Options: */
-    "esModuleInterop": true,
-    "skipLibCheck": true,
+    /* Base Options */
     "target": "es2022",
+    "module": "NodeNext",
+    "esModuleInterop": true,
+    "downlevelIteration": true,
+    "skipLibCheck": true,
     "allowJs": true,
     "resolveJsonModule": true,
-    "moduleDetection": "force",
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "allowImportingTsExtensions": true,
 
     /* Strictness */
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
 
-    /* If transpiling with TypeScript: */
-    "module": "NodeNext",
+    /* Output */
     "outDir": "dist",
     "sourceMap": true,
-
-    /* AND if you're building for a library: */
     "declaration": true,
-
-    /* AND if you're building for a library in a monorepo: */
-    "composite": true,
     "declarationMap": true,
+    "composite": true,
 
-    /* If NOT transpiling with TypeScript: */
-    "module": "preserve",
-    "noEmit": true,
-
-    /* If your code runs in the DOM: */
-    "lib": ["es2022", "dom", "dom.iterable"],
-
-    /* If your code doesn't run in the DOM: */
-    "lib": ["es2022"]
+    /* Libraries */
+    "lib": ["es2022", "dom", "dom.iterable"]
   }
 }
