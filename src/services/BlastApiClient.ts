@@ -139,8 +139,8 @@ export class BlastApiClient {
         const seq = sequence.cleaned || sequence.raw;
 
         // Enforce minimum length
-        if (!seq || seq.length < 20) {
-            throw new Error("Sequence must be at least 20 nucleotides long");
+        if (!seq || seq.length < 10) {
+            throw new Error("Sequence must be at least 10 nucleotides long");
         }
 
         // Try to get NCBI's recommended parameters
