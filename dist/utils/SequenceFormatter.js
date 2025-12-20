@@ -1,4 +1,5 @@
 import { EmbedBuilder } from "discord.js";
+import { SpeciesImageService } from "../services/SpeciesImageService.js";
 /**
  * Formats bioinformatics analysis results for Discord
  */
@@ -6,7 +7,7 @@ export class SequenceFormatter {
     /**
      * Create main analysis result embed
      */
-    static createAnalysisEmbed(result) {
+    static async createAnalysisEmbed(result) {
         const embed = new EmbedBuilder()
             .setTitle("🧬 DNA Sequence Analysis")
             .setColor(this.getConfidenceColor(result.confidence))
@@ -40,6 +41,18 @@ export class SequenceFormatter {
                         inline: false
                     }
                 ]);
+                // Try to fetch and add species image
+                try {
+                    const imageUrl = await SpeciesImageService.getSpeciesImage(topMatch.species, topMatch.commonName || undefined);
+                    if (imageUrl) {
+                        // Set as thumbnail for a cleaner look (smaller image in top-right)
+                        embed.setThumbnail(imageUrl);
+                    }
+                }
+                catch (error) {
+                    // Silently fail if image fetching fails - don't break the embed
+                    console.warn(`Failed to fetch image for species ${topMatch.species}:`, error);
+                }
             }
             // Additional matches if available
             if (result.topMatches.length > 1) {

@@ -60,11 +60,9 @@ export class BioinformaticsPlugin implements BotPlugin {
 
     async initialize(client: Client, bot: ExtensibleBot): Promise<void> {
         client.on("messageCreate", (message) => {
-            if (Math.random() < 0.1) {
-                this.scanMessage(message).catch(error => {
-                    this.logger.error('Error in message scanning:', error);
-                });
-            }
+            this.scanMessage(message).catch(error => {
+                this.logger.error('Error in message scanning:', error);
+            });
         });
 
         this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
@@ -93,7 +91,7 @@ export class BioinformaticsPlugin implements BotPlugin {
             );
 
             if (extractionResult.sequences.length === 0) return;
-            if (extractionResult.totalAtcgCount < 20) return;
+            if (extractionResult.totalAtcgCount < 15) return;
 
             // Only process the best sequence automatically
             const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];
@@ -123,7 +121,7 @@ export class BioinformaticsPlugin implements BotPlugin {
 
             let result = this.cacheManager.getCachedResult(sequence);
             if (result) {
-                const embed = SequenceFormatter.createAnalysisEmbed(result);
+                const embed = await SequenceFormatter.createAnalysisEmbed(result);
                 await message.reply({ embeds: [embed] });
                 return;
             }
@@ -134,7 +132,7 @@ export class BioinformaticsPlugin implements BotPlugin {
 
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const finalEmbed = SequenceFormatter.createAnalysisEmbed(result);
+                    const finalEmbed = await SequenceFormatter.createAnalysisEmbed(result);
                     await notificationMsg.edit({ embeds: [finalEmbed] });
                 } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -159,7 +157,7 @@ export class BioinformaticsPlugin implements BotPlugin {
                 const processingMsg = await message.reply("🔄 Analyzing sequence with NCBI BLAST...");
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const embed = SequenceFormatter.createAnalysisEmbed(result);
+                    const embed = await SequenceFormatter.createAnalysisEmbed(result);
                     await processingMsg.edit({ content: '', embeds: [embed] });
                 } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

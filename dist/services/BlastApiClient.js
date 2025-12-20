@@ -45,17 +45,41 @@ export class BlastApiClient {
         return await this.getResults(rid);
     }
     async submitSequence(sequence) {
+        const seq = sequence.cleaned || sequence.raw;
+        // Enforce minimum length
+        if (!seq) {
+            throw new Error("Sequence must be at least 20 nucleotides long");
+        }
+        // Dynamic parameter adjustment based on length
+        let wordSize;
+        let expect;
+        if (seq.length < 50) {
+            wordSize = 4; // small word size for short sequences
+            expect = "1500"; // very permissive
+        }
+        else if (seq.length < 200) {
+            wordSize = 7;
+            expect = "100";
+        }
+        else if (seq.length < 1000) {
+            wordSize = 11;
+            expect = "10";
+        }
+        else {
+            wordSize = 15; // for very long sequences, faster search
+            expect = "0.01"; // more stringent
+        }
         const params = new URLSearchParams({
             CMD: "Put",
             PROGRAM: "blastn",
             DATABASE: "nt",
-            QUERY: sequence.cleaned || sequence.raw,
+            QUERY: seq,
             FORMAT_TYPE: "JSON2",
-            EXPECT: "1500", // Very permissive e-value for short sequences
-            HITLIST_SIZE: "50", // Get more hits
-            WORD_SIZE: "4", // Very small word size for short sequences
-            FILTER: "F", // Disable low complexity filter
-            DUST: "no" // Disable dust filter
+            EXPECT: expect,
+            HITLIST_SIZE: "50",
+            WORD_SIZE: wordSize.toString(),
+            FILTER: "F",
+            DUST: "no"
         });
         const response = await fetch(`${this.baseUrl}?${params}`, {
             method: "POST",
@@ -162,9 +186,7 @@ export class BlastApiClient {
                 if (fetched.BlastJSON) {
                     const baseFile = file.replace('_1.json', '.json');
                     try {
-                        const baseFetched = await this.fetchBlastJsonFile(rid, baseFile);
-                        console.log(`[BLAST] Base file structure:`, Object.keys(baseFetched));
-                        search = baseFetched.BlastOutput2?.[0]?.report?.results?.search;
+                        search = (await this.fetchBlastJsonFile(rid, baseFile)).BlastOutput2?.[0]?.report?.results?.search;
                     }
                     catch (baseError) {
                         console.error(`[BLAST] Base file ${baseFile} also failed:`, baseError);

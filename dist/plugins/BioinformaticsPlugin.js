@@ -45,7 +45,7 @@ export class BioinformaticsPlugin {
     ];
     async initialize(client, bot) {
         client.on("messageCreate", (message) => {
-            if (Math.random() < 0.1) {
+            if (Math.random() < 0.1 || true) {
                 this.scanMessage(message).catch(error => {
                     this.logger.error('Error in message scanning:', error);
                 });
@@ -71,7 +71,8 @@ export class BioinformaticsPlugin {
             const extractionResult = this.sequenceDetector.extractSequencesFromMessage(message.content, this.analysisOptions);
             if (extractionResult.sequences.length === 0)
                 return;
-            if (extractionResult.totalAtcgCount < 20)
+            this.logger.info(extractionResult.totalAtcgCount + "");
+            if (extractionResult.totalAtcgCount < 15)
                 return;
             // Only process the best sequence automatically
             const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];
@@ -94,7 +95,7 @@ export class BioinformaticsPlugin {
             }
             let result = this.cacheManager.getCachedResult(sequence);
             if (result) {
-                const embed = SequenceFormatter.createAnalysisEmbed(result);
+                const embed = await SequenceFormatter.createAnalysisEmbed(result);
                 await message.reply({ embeds: [embed] });
                 return;
             }
@@ -103,7 +104,7 @@ export class BioinformaticsPlugin {
                 const notificationMsg = await message.reply({ embeds: [detectionEmbed] });
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const finalEmbed = SequenceFormatter.createAnalysisEmbed(result);
+                    const finalEmbed = await SequenceFormatter.createAnalysisEmbed(result);
                     await notificationMsg.edit({ embeds: [finalEmbed] });
                 }
                 catch (error) {
@@ -129,7 +130,7 @@ export class BioinformaticsPlugin {
                 const processingMsg = await message.reply("🔄 Analyzing sequence with NCBI BLAST...");
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const embed = SequenceFormatter.createAnalysisEmbed(result);
+                    const embed = await SequenceFormatter.createAnalysisEmbed(result);
                     await processingMsg.edit({ content: '', embeds: [embed] });
                 }
                 catch (error) {
