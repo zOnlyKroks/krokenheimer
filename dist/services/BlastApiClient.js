@@ -7,14 +7,39 @@ export class BlastApiClient {
     async analyzeSequence(sequence) {
         // 1. Submit sequence
         const rid = await this.submitSequence(sequence);
-        // 2. Wait until BLAST job is ready
+        // 2. Wait until BLAST job is ready (with timeout)
+        const startTime = Date.now();
+        const maxWaitTime = 300000;
+        const pollInterval = 12000;
         let status = "WAITING";
-        while (status === "WAITING") {
-            await this.sleep(5000); // wait 5 seconds between checks
-            status = await this.checkStatus(rid);
+        let unknownCount = 0;
+        const maxUnknownAttempts = 3;
+        while (Date.now() - startTime < maxWaitTime) {
+            await this.sleep(pollInterval);
+            try {
+                status = await this.checkStatus(rid);
+                if (status === "READY") {
+                    break;
+                }
+                else if (status === "WAITING") {
+                    unknownCount = 0; // Reset unknown counter
+                }
+                else if (status === "UNKNOWN") {
+                    unknownCount++;
+                    console.warn(`[BLAST] Unknown status ${unknownCount}/${maxUnknownAttempts}`);
+                    if (unknownCount >= maxUnknownAttempts) {
+                        throw new Error(`Status check failed after ${unknownCount} consecutive UNKNOWN responses`);
+                    }
+                }
+            }
+            catch (error) {
+                console.error(`[BLAST] Status check error:`, error);
+                throw error;
+            }
         }
         if (status !== "READY") {
-            throw new Error("BLAST job did not complete successfully");
+            const elapsed = (Date.now() - startTime) / 1000;
+            throw new Error(`BLAST job timeout: ${status} after ${elapsed.toFixed(1)}s`);
         }
         // 3. Retrieve results
         return await this.getResults(rid);
@@ -25,7 +50,12 @@ export class BlastApiClient {
             PROGRAM: "blastn",
             DATABASE: "nt",
             QUERY: sequence.cleaned || sequence.raw,
-            FORMAT_TYPE: "JSON2"
+            FORMAT_TYPE: "JSON2",
+            EXPECT: "1500", // Very permissive e-value for short sequences
+            HITLIST_SIZE: "50", // Get more hits
+            WORD_SIZE: "4", // Very small word size for short sequences
+            FILTER: "F", // Disable low complexity filter
+            DUST: "no" // Disable dust filter
         });
         const response = await fetch(`${this.baseUrl}?${params}`, {
             method: "POST",
@@ -36,12 +66,15 @@ export class BlastApiClient {
         }
         const text = await response.text();
         const match = text.match(/RID\s*=\s*(\S+)/);
-        if (!match)
+        if (!match) {
             throw new Error("No RID returned from BLAST");
+        }
+        console.log(`[BLAST] Extracted RID: ${match[1]}`);
         // @ts-ignore
         return match[1];
     }
     async checkStatus(rid) {
+        console.log(`[BLAST] Checking status for RID: ${rid}`);
         for (let attempt = 1; attempt <= this.statusCheckRetries; attempt++) {
             try {
                 const params = new URLSearchParams({
@@ -56,16 +89,25 @@ export class BlastApiClient {
                     throw new Error(`Status check failed (${response.status})`);
                 }
                 const text = await response.text();
-                if (text.includes("Status=WAITING"))
+                if (text.includes("Status=WAITING")) {
                     return "WAITING";
-                if (text.includes("Status=READY"))
+                }
+                if (text.includes("Status=READY")) {
                     return "READY";
-                if (text.includes("FAILED"))
+                }
+                // Check if we got the actual XML results instead of status
+                if (text.includes("BlastOutput") && text.includes("<?xml")) {
+                    return "READY";
+                }
+                if (text.includes("FAILED")) {
                     throw new Error("BLAST job failed");
+                }
             }
             catch (err) {
-                if (attempt === this.statusCheckRetries)
+                if (attempt === this.statusCheckRetries) {
+                    console.error(`[BLAST] All status check attempts failed, returning UNKNOWN`);
                     return "UNKNOWN";
+                }
                 await this.sleep(2000 * attempt);
             }
         }
@@ -75,7 +117,6 @@ export class BlastApiClient {
     /* RESULTS RETRIEVAL                                                   */
     /* ------------------------------------------------------------------ */
     async getResults(rid) {
-        console.log(`[BLAST] Retrieving results for ${rid}`);
         const params = new URLSearchParams({
             CMD: "Get",
             RID: rid,
@@ -114,16 +155,39 @@ export class BlastApiClient {
             status: "completed"
         };
         let search = null;
-        // Normal JSON2
-        if (data.BlastOutput2) {
-            search = data.BlastOutput2[0]?.report?.results?.search;
-        }
-        // Manifest-only JSON
-        else if (data.BlastJSON?.[0]?.File) {
+        if (data.BlastJSON?.[0]?.File) {
             const file = data.BlastJSON[0].File;
-            console.log(`[BLAST] Manifest points to ${file}, fetching externally`);
-            const fetched = await this.fetchBlastJsonFile(rid, file);
-            search = fetched.BlastOutput2?.[0]?.report?.results?.search;
+            try {
+                const fetched = await this.fetchBlastJsonFile(rid, file);
+                // Check if external file has actual results
+                search = fetched.BlastOutput2?.[0]?.report?.results?.search;
+                if (fetched.BlastJSON) {
+                    const baseFile = file.replace('_1.json', '.json');
+                    try {
+                        const baseFetched = await this.fetchBlastJsonFile(rid, baseFile);
+                        console.log(`[BLAST] Base file structure:`, Object.keys(baseFetched));
+                        search = baseFetched.BlastOutput2?.[0]?.report?.results?.search;
+                    }
+                    catch (baseError) {
+                        console.error(`[BLAST] Base file ${baseFile} also failed:`, baseError);
+                    }
+                    if (!search) {
+                        try {
+                            const xmlResults = await this.getXMLResults(rid);
+                            if (xmlResults) {
+                                return xmlResults;
+                            }
+                        }
+                        catch (xmlError) {
+                            console.error(`[BLAST] XML fallback also failed:`, xmlError);
+                        }
+                    }
+                }
+            }
+            catch (error) {
+                console.error(`[BLAST] Failed to fetch external file ${file}:`, error);
+                throw error;
+            }
         }
         if (!search) {
             throw new Error("No BLAST search results found");
@@ -134,8 +198,87 @@ export class BlastApiClient {
         const hits = search.hits || [];
         results.hits = hits
             .slice(0, 10)
-            .map((h) => this.parseBlastHit(h))
+            .map((h) => {
+            return this.parseBlastHit(h);
+        })
             .filter(Boolean);
+        return results;
+    }
+    /**
+     * Get BLAST results in XML format as fallback for short sequences
+     */
+    async getXMLResults(rid) {
+        const params = new URLSearchParams({
+            CMD: "Get",
+            RID: rid,
+            FORMAT_TYPE: "XML"
+        });
+        const response = await fetch(`${this.baseUrl}?${params}`, {
+            headers: { "User-Agent": "Discord-Bot-Genome-Sequencer/1.0" }
+        });
+        if (!response.ok) {
+            return null;
+        }
+        const xmlText = await response.text();
+        // Parse XML to extract actual hits
+        const results = {
+            requestId: rid,
+            querySequence: "Sequence",
+            queryLength: 0,
+            database: "nt",
+            program: "blastn",
+            hits: [],
+            timestamp: Date.now(),
+            executionTime: 0,
+            status: "completed"
+        };
+        try {
+            const hitMatches = xmlText.match(/<Hit>(.*?)<\/Hit>/gs);
+            if (hitMatches) {
+                for (const hitXml of hitMatches.slice(0, 10)) {
+                    const accession = hitXml.match(/<Hit_accession>(.*?)<\/Hit_accession>/)?.[1] || 'Unknown';
+                    const def = hitXml.match(/<Hit_def>(.*?)<\/Hit_def>/)?.[1] || 'Unknown';
+                    const hspMatch = hitXml.match(/<Hsp>(.*?)<\/Hsp>/s);
+                    if (hspMatch) {
+                        // @ts-ignore
+                        const evalue = parseFloat(hspMatch[1].match(/<Hsp_evalue>(.*?)<\/Hsp_evalue>/)?.[1] || '1');
+                        // @ts-ignore
+                        const bitScore = parseFloat(hspMatch[1].match(/<Hsp_bit-score>(.*?)<\/Hsp_bit-score>/)?.[1] || '0');
+                        // @ts-ignore
+                        const identity = parseInt(hspMatch[1].match(/<Hsp_identity>(\d+)<\/Hsp_identity>/)?.[1] || '0');
+                        // @ts-ignore
+                        const alignLen = parseInt(hspMatch[1].match(/<Hsp_align-len>(\d+)<\/Hsp_align-len>/)?.[1] || '0');
+                        const hit = {
+                            accession,
+                            description: def,
+                            scientificName: this.extractSpeciesNames(def).scientificName,
+                            commonName: this.extractSpeciesNames(def).commonName,
+                            eValue: evalue,
+                            bitScore,
+                            identity: alignLen > 0 ? (identity / alignLen) * 100 : 0,
+                            coverage: 50, // Rough estimate
+                            alignmentLength: alignLen,
+                            taxonId: undefined
+                        };
+                        results.hits.push(hit);
+                    }
+                }
+            }
+            const queryDefMatch = xmlText.match(/<BlastOutput_query-def>(.*?)<\/BlastOutput_query-def>/);
+            if (queryDefMatch) {
+                // @ts-ignore
+                results.querySequence = queryDefMatch[1];
+            }
+            const queryLenMatch = xmlText.match(/<BlastOutput_query-len>(\d+)<\/BlastOutput_query-len>/);
+            if (queryLenMatch) {
+                // @ts-ignore
+                results.queryLength = parseInt(queryLenMatch[1]);
+            }
+        }
+        catch (error) {
+            console.error(`[BLAST] Error parsing XML results:`, error);
+            console.log(`[BLAST] XML content that failed to parse:`, xmlText.substring(0, 1000));
+        }
         return results;
     }
     /* ------------------------------------------------------------------ */
@@ -154,7 +297,20 @@ export class BlastApiClient {
         if (!response.ok) {
             throw new Error(`Failed to fetch BLAST file ${file}`);
         }
-        return JSON.parse(await response.text());
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/zip")) {
+            const zipBuffer = Buffer.from(await response.arrayBuffer());
+            const manifestText = await this.extractFirstJsonFromZip(zipBuffer);
+            return JSON.parse(manifestText);
+        }
+        const text = await response.text();
+        // Check if text response is actually a ZIP file (starts with PK)
+        if (text.charCodeAt(0) === 80 && text.charCodeAt(1) === 75) {
+            const zipBuffer = Buffer.from(text, 'latin1');
+            const manifestText = await this.extractFirstJsonFromZip(zipBuffer);
+            return JSON.parse(manifestText);
+        }
+        return JSON.parse(text);
     }
     /* ------------------------------------------------------------------ */
     /* HIT PARSING                                                         */

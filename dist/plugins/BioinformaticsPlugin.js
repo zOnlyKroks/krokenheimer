@@ -45,9 +45,11 @@ export class BioinformaticsPlugin {
     ];
     async initialize(client, bot) {
         client.on("messageCreate", (message) => {
-            this.scanMessage(message).catch(error => {
-                this.logger.error('Error in message scanning:', error);
-            });
+            if (Math.random() < 0.1) {
+                this.scanMessage(message).catch(error => {
+                    this.logger.error('Error in message scanning:', error);
+                });
+            }
         });
         this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
     }
@@ -57,8 +59,6 @@ export class BioinformaticsPlugin {
     }
     async scanMessage(message) {
         if (message.author.bot || message.content.startsWith('!'))
-            return;
-        if (message.content.length < 15)
             return;
         const context = {
             userId: message.author.id,
@@ -70,6 +70,8 @@ export class BioinformaticsPlugin {
         try {
             const extractionResult = this.sequenceDetector.extractSequencesFromMessage(message.content, this.analysisOptions);
             if (extractionResult.sequences.length === 0)
+                return;
+            if (extractionResult.totalAtcgCount < 20)
                 return;
             // Only process the best sequence automatically
             const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];
@@ -106,8 +108,21 @@ export class BioinformaticsPlugin {
                 }
                 catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    const errorEmbed = SequenceFormatter.createErrorEmbed(`Analysis failed: ${errorMessage}`, sequence);
-                    await notificationMsg.edit({ embeds: [errorEmbed] });
+                    // Log error instead of sending Discord message
+                    this.logger.error(`[BIOINFORMATICS] Automatic analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
+                        error: errorMessage,
+                        sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                        method: sequence.extractionMethod,
+                        user: context.userId || 'unknown',
+                        channel: context.channelId || 'unknown',
+                    });
+                    // Delete the notification message instead of showing error
+                    try {
+                        await notificationMsg.delete();
+                    }
+                    catch (deleteError) {
+                        this.logger.error('[BIOINFORMATICS] Failed to delete notification message:', deleteError);
+                    }
                 }
             }
             else {
@@ -119,22 +134,37 @@ export class BioinformaticsPlugin {
                 }
                 catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    const errorEmbed = SequenceFormatter.createErrorEmbed(`Analysis failed: ${errorMessage}`, sequence);
-                    await processingMsg.edit({ content: '', embeds: [errorEmbed] });
+                    this.logger.error(`[BIOINFORMATICS] Manual analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
+                        error: errorMessage,
+                        sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                        method: sequence.extractionMethod,
+                        user: context.userId || 'unknown',
+                        channel: context.channelId || 'unknown',
+                    });
+                    try {
+                        await processingMsg.delete();
+                    }
+                    catch (deleteError) {
+                        this.logger.error('[BIOINFORMATICS] Failed to delete processing message:', deleteError);
+                    }
                 }
             }
         }
         catch (error) {
-            this.logger.error('Error processing sequence:', error);
-            if (!isAutomatic) {
-                const errorEmbed = SequenceFormatter.createErrorEmbed("An unexpected error occurred during analysis.");
-                await message.reply({ embeds: [errorEmbed] });
-            }
+            // Log all sequence processing errors without sending Discord messages
+            this.logger.error(`[BIOINFORMATICS] Sequence processing error (${isAutomatic ? 'automatic' : 'manual'}):`, {
+                error: error instanceof Error ? error.message : String(error),
+                sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                sequenceLength: sequence.cleaned?.length || sequence.raw?.length,
+                method: sequence.extractionMethod,
+                user: context.userId || 'unknown',
+                channel: context.channelId || 'unknown',
+                isAutomatic
+            });
         }
     }
     async analyzeSequence(sequence, context) {
         const startTime = Date.now();
-        // ✅ Use fixed BlastApiClient
         const blastResults = await this.blastClient.analyzeSequence(sequence);
         const topMatches = blastResults.hits.slice(0, 5).map(hit => ({
             species: hit.scientificName,

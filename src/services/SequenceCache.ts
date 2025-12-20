@@ -14,7 +14,7 @@ export class SequenceCache {
   private cache = new Map<string, CacheEntry>();
   private readonly defaultTTL = 24 * 60 * 60 * 1000; // 24 hours
   private readonly maxCacheSize = 1000; // Maximum number of cached entries
-  private cleanupInterval: NodeJS.Timeout;
+  private readonly cleanupInterval: NodeJS.Timeout;
 
   constructor() {
     // Run cleanup every hour
