@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import { ExtensibleBot } from "./core/Bot.js";
 import { GifPlugin } from "./plugins/GifPlugin.js";
 import { CorePlugin } from "./plugins/CorePlugin.js";
+import { BioinformaticsPlugin } from "./plugins/BioinformaticsPlugin.js";
 import type { BotConfig } from "./types/index.ts";
 
 dotenv.config();
@@ -20,6 +21,7 @@ async function main() {
   try {
     await bot.loadPlugin(new CorePlugin());
     await bot.loadPlugin(new GifPlugin());
+    await bot.loadPlugin(new BioinformaticsPlugin());
 
     await bot.start();
 
