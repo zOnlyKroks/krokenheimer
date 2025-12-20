@@ -208,9 +208,7 @@ export class BlastApiClient {
                     const baseFile = file.replace('_1.json', '.json');
 
                     try {
-                        const baseFetched = await this.fetchBlastJsonFile(rid, baseFile);
-                        console.log(`[BLAST] Base file structure:`, Object.keys(baseFetched));
-                        search = baseFetched.BlastOutput2?.[0]?.report?.results?.search;
+                        search = (await this.fetchBlastJsonFile(rid, baseFile)).BlastOutput2?.[0]?.report?.results?.search;
                     } catch (baseError) {
                         console.error(`[BLAST] Base file ${baseFile} also failed:`, baseError);
                     }
