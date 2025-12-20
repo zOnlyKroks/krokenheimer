@@ -45,11 +45,9 @@ export class BioinformaticsPlugin {
     ];
     async initialize(client, bot) {
         client.on("messageCreate", (message) => {
-            if (Math.random() < 0.1 || true) {
-                this.scanMessage(message).catch(error => {
-                    this.logger.error('Error in message scanning:', error);
-                });
-            }
+            this.scanMessage(message).catch(error => {
+                this.logger.error('Error in message scanning:', error);
+            });
         });
         this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
     }
@@ -71,8 +69,7 @@ export class BioinformaticsPlugin {
             const extractionResult = this.sequenceDetector.extractSequencesFromMessage(message.content, this.analysisOptions);
             if (extractionResult.sequences.length === 0)
                 return;
-            this.logger.info(extractionResult.totalAtcgCount + "");
-            if (extractionResult.totalAtcgCount < 15)
+            if (extractionResult.totalAtcgCount < 10)
                 return;
             // Only process the best sequence automatically
             const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];

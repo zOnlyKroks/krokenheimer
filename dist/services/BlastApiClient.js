@@ -44,44 +44,117 @@ export class BlastApiClient {
         // 3. Retrieve results
         return await this.getResults(rid);
     }
+    /**
+     * Fetch NCBI's recommended parameters for the given sequence
+     */
+    async getRecommendedParameters(sequence) {
+        try {
+            const params = new URLSearchParams({
+                CMD: "Info",
+                PROGRAM: "blastn",
+                DATABASE: "nt",
+                QUERY: sequence.substring(0, 100), // Send sample for analysis
+                FORMAT_TYPE: "JSON2"
+            });
+            const response = await fetch(`${this.baseUrl}?${params}`, {
+                method: "POST",
+                headers: { "User-Agent": "Discord-Bot-Genome-Sequencer/1.0" }
+            });
+            if (!response.ok) {
+                console.warn(`[BLAST] Parameter recommendation request failed (${response.status})`);
+                return null;
+            }
+            const text = await response.text();
+            console.log(text);
+            // Parse parameter suggestions from response
+            // NCBI returns recommended values in the Info response
+            const wordSizeMatch = text.match(/WORD_SIZE["\s:=]+(\d+)/i);
+            const expectMatch = text.match(/EXPECT["\s:=]+([\d.e+-]+)/i);
+            const hitlistMatch = text.match(/HITLIST_SIZE["\s:=]+(\d+)/i);
+            if (wordSizeMatch || expectMatch) {
+                const params = {
+                    // @ts-ignore
+                    wordSize: wordSizeMatch ? parseInt(wordSizeMatch[1]) : this.getDefaultWordSize(sequence.length),
+                    // @ts-ignore
+                    expect: expectMatch ? expectMatch[1] : this.getDefaultExpect(sequence.length),
+                    // @ts-ignore
+                    hitlistSize: hitlistMatch ? hitlistMatch[1] : "50",
+                    filter: "F",
+                    dust: "no"
+                };
+                console.log(`[BLAST] Using NCBI recommended parameters:`, params);
+                return params;
+            }
+            return null;
+        }
+        catch (error) {
+            console.warn(`[BLAST] Failed to get parameter recommendations:`, error);
+            return null;
+        }
+    }
+    /**
+     * Get default word size based on sequence length (fallback)
+     */
+    getDefaultWordSize(length) {
+        if (length < 50)
+            return 7; // Short sequences need smaller word size
+        if (length < 200)
+            return 11;
+        if (length < 1000)
+            return 11;
+        return 28; // Long sequences can use larger word size
+    }
+    /**
+     * Get default expect value based on sequence length (fallback)
+     */
+    getDefaultExpect(length) {
+        if (length < 50)
+            return "1000"; // Very permissive for short sequences
+        if (length < 200)
+            return "10";
+        if (length < 1000)
+            return "10";
+        return "0.01"; // More stringent for long sequences
+    }
     async submitSequence(sequence) {
         const seq = sequence.cleaned || sequence.raw;
         // Enforce minimum length
-        if (!seq) {
-            throw new Error("Sequence must be at least 20 nucleotides long");
+        if (!seq || seq.length < 10) {
+            throw new Error("Sequence must be at least 10 nucleotides long");
         }
-        // Dynamic parameter adjustment based on length
-        let wordSize;
-        let expect;
-        if (seq.length < 50) {
-            wordSize = 4; // small word size for short sequences
-            expect = "1500"; // very permissive
+        // Try to get NCBI's recommended parameters
+        let params = null;
+        try {
+            params = await this.getRecommendedParameters(seq);
+            console.log(params);
         }
-        else if (seq.length < 200) {
-            wordSize = 7;
-            expect = "100";
+        catch (error) {
+            console.warn(`[BLAST] Could not fetch recommended parameters, using defaults`);
         }
-        else if (seq.length < 1000) {
-            wordSize = 11;
-            expect = "10";
+        // Fall back to manual logic if NCBI doesn't provide recommendations
+        if (!params) {
+            params = {
+                wordSize: this.getDefaultWordSize(seq.length),
+                expect: this.getDefaultExpect(seq.length),
+                hitlistSize: "50",
+                filter: "F",
+                dust: "no"
+            };
+            console.log(`[BLAST] Using default parameters for length ${seq.length}:`, params);
         }
-        else {
-            wordSize = 15; // for very long sequences, faster search
-            expect = "0.01"; // more stringent
-        }
-        const params = new URLSearchParams({
+        const urlParams = new URLSearchParams({
             CMD: "Put",
             PROGRAM: "blastn",
             DATABASE: "nt",
             QUERY: seq,
             FORMAT_TYPE: "JSON2",
-            EXPECT: expect,
-            HITLIST_SIZE: "50",
-            WORD_SIZE: wordSize.toString(),
-            FILTER: "F",
-            DUST: "no"
+            EXPECT: params.expect,
+            HITLIST_SIZE: params.hitlistSize,
+            WORD_SIZE: params.wordSize.toString(),
+            FILTER: params.filter,
+            DUST: params.dust
         });
-        const response = await fetch(`${this.baseUrl}?${params}`, {
+        const response = await fetch(`${this.baseUrl}?${urlParams}`, {
             method: "POST",
             headers: { "User-Agent": "Discord-Bot-Genome-Sequencer/1.0" }
         });
