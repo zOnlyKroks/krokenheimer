@@ -69,12 +69,10 @@ export class BlastApiClient {
         if (!match) {
             throw new Error("No RID returned from BLAST");
         }
-        console.log(`[BLAST] Extracted RID: ${match[1]}`);
         // @ts-ignore
         return match[1];
     }
     async checkStatus(rid) {
-        console.log(`[BLAST] Checking status for RID: ${rid}`);
         for (let attempt = 1; attempt <= this.statusCheckRetries; attempt++) {
             try {
                 const params = new URLSearchParams({
