@@ -148,6 +148,7 @@ export class BlastApiClient {
 
         try {
             params = await this.getRecommendedParameters(seq);
+            console.log(params);
         } catch (error) {
             console.warn(`[BLAST] Could not fetch recommended parameters, using defaults`);
         }
