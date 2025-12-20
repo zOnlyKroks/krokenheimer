@@ -91,7 +91,7 @@ export class BioinformaticsPlugin implements BotPlugin {
             );
 
             if (extractionResult.sequences.length === 0) return;
-            if (extractionResult.totalAtcgCount < 15) return;
+            if (extractionResult.totalAtcgCount < 10) return;
 
             // Only process the best sequence automatically
             const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];
