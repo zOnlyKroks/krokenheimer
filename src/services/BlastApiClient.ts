@@ -433,12 +433,13 @@ export class BlastApiClient {
 
     private parseXMLResults(rid: string, seq: string, xml: string): BlastResults {
         const hits: BlastHit[] = [];
+        const seenSpecies = new Set<string>(); // Track species we've already added
 
         // Extract all <Hit> blocks using regex
         const hitBlocks = xml.match(/<Hit>[\s\S]*?<\/Hit>/g) || [];
         console.log(`[BLAST] Found ${hitBlocks.length} <Hit> blocks in XML`);
 
-        for (const hitBlock of hitBlocks.slice(0, 20)) {
+        for (const hitBlock of hitBlocks.slice(0, 50)) { // Check more hits to find unique species
             try {
                 // Extract key fields from XML
                 const accMatch = hitBlock.match(/<Hit_accession>(.*?)<\/Hit_accession>/);
@@ -477,6 +478,19 @@ export class BlastApiClient {
                 if (scientificName === "Unknown species" && !commonName) {
                     console.log(`[BLAST] Filtering out unknown species hit: ${accession}`);
                     continue;
+                }
+
+                // FILTER OUT duplicate species - only keep first occurrence of each species
+                const speciesKey = scientificName.toLowerCase();
+                if (seenSpecies.has(speciesKey)) {
+                    console.log(`[BLAST] Filtering out duplicate species: ${scientificName} (${accession})`);
+                    continue;
+                }
+                seenSpecies.add(speciesKey);
+
+                // Stop if we have enough unique species
+                if (hits.length >= 10) {
+                    break;
                 }
 
                 // Calculate identity percentage
@@ -520,9 +534,13 @@ export class BlastApiClient {
         }
 
         console.log(`[BLAST] Successfully parsed ${hits.length} hits from XML (after filtering)`);
+
+        // Sort hits by identity percentage (highest first)
+        hits.sort((a, b) => b.identity - a.identity);
+
         if (hits.length > 0) {
             // @ts-ignore
-            console.log(`[BLAST] Top hit: ${hits[0].accession} - ${hits[0].scientificName}`);
+            console.log(`[BLAST] Top hit: ${hits[0].accession} - ${hits[0].scientificName} (${hits[0].identity.toFixed(1)}% identity)`);
         } else {
             console.log(`[BLAST] No valid species matches found after filtering`);
         }
@@ -591,7 +609,7 @@ export class BlastApiClient {
             program: "blastn",
             database: "ena_sequence",
             sequence: fastaSeq,
-            email: "blast@example.com",
+            email: "finnrades@gmail.com",
             stype: "dna",
             task: seq.length < 50 ? "blastn-short" : "megablast",
             exp: "1000",
