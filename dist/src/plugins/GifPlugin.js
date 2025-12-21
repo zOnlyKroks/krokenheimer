@@ -1,4 +1,3 @@
-import { Message, Client } from "discord.js";
 import { createCanvas, loadImage } from "canvas";
 import { createWriteStream, unlinkSync } from "fs";
 import * as path from "path";

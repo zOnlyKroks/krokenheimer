@@ -1,21 +1,17 @@
-import { Message, Client, EmbedBuilder } from "discord.js";
+import { EmbedBuilder } from "discord.js";
 import { SequenceDetector } from "../services/SequenceDetector.js";
-import { BlastApiClient, BlastRateLimiter } from "../services/BlastApiClient.js";
+import { BlastApiClient } from "../services/BlastApiClient.js";
 import { SequenceCacheManager } from "../services/SequenceCache.js";
 import { SequenceFormatter } from "../utils/SequenceFormatter.js";
 import { Logger } from "../core/util/logger.js";
 export class BioinformaticsPlugin {
     name = "BioinformaticsPlugin";
     description = "Automatic DNA sequence analysis and species identification";
-    version = "1.0.0";
+    version = "1.0.1";
     sequenceDetector = new SequenceDetector();
     blastClient = new BlastApiClient();
-    blastRateLimiter = new BlastRateLimiter();
     cacheManager = new SequenceCacheManager();
     logger = new Logger();
-    isInitialized = false;
-    client;
-    bot;
     // Analysis options
     analysisOptions = {
         minSequenceLength: 8,
@@ -47,42 +43,21 @@ export class BioinformaticsPlugin {
             execute: this.showStats.bind(this)
         }
     ];
-    /**
-     * Initialize the plugin
-     */
     async initialize(client, bot) {
-        this.client = client;
-        this.bot = bot;
-        // Add message event listener for automatic scanning
         client.on("messageCreate", (message) => {
-            // Run async without blocking
             this.scanMessage(message).catch(error => {
                 this.logger.error('Error in message scanning:', error);
             });
         });
-        this.isInitialized = true;
         this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
     }
-    /**
-     * Cleanup plugin resources
-     */
     async cleanup() {
         this.cacheManager.destroy();
-        this.isInitialized = false;
         this.logger.info('BioinformaticsPlugin cleanup completed');
     }
-    /**
-     * Scan incoming messages for DNA sequences (automatic detection)
-     */
     async scanMessage(message) {
-        // Skip bot messages and commands
-        if (message.author.bot || message.content.startsWith('!')) {
+        if (message.author.bot || message.content.startsWith('!'))
             return;
-        }
-        // Skip short messages
-        if (message.content.length < 10) {
-            return;
-        }
         const context = {
             userId: message.author.id,
             channelId: message.channel.id,
@@ -91,92 +66,104 @@ export class BioinformaticsPlugin {
             timestamp: message.createdTimestamp
         };
         try {
-            // Extract sequences from the message
             const extractionResult = this.sequenceDetector.extractSequencesFromMessage(message.content, this.analysisOptions);
-            // Skip if no valid sequences found
-            if (extractionResult.sequences.length === 0) {
+            if (extractionResult.sequences.length === 0)
                 return;
-            }
-            // Process each valid sequence
-            for (const sequence of extractionResult.sequences) {
-                await this.processSequence(sequence, message, context, true);
-            }
+            if (extractionResult.totalAtcgCount < 10)
+                return;
+            // Only process the best sequence automatically
+            const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];
+            // @ts-ignore
+            await this.processSequence(bestSequence, message, context, true);
         }
         catch (error) {
             this.logger.error('Error in automatic sequence scanning:', error);
         }
     }
-    /**
-     * Process a DNA sequence for analysis
-     */
     async processSequence(sequence, message, context, isAutomatic = false) {
         try {
-            // Check rate limits
             const rateLimitCheck = this.cacheManager.canUserAnalyze(context);
             if (!rateLimitCheck.allowed) {
-                if (!isAutomatic) { // Only show rate limit message for manual commands
+                if (!isAutomatic) {
                     const embed = SequenceFormatter.createRateLimitEmbed(rateLimitCheck.resetTime);
                     await message.reply({ embeds: [embed] });
                 }
                 return;
             }
-            // Check cache first
             let result = this.cacheManager.getCachedResult(sequence);
             if (result) {
-                // Cache hit - send result immediately
-                const embed = SequenceFormatter.createAnalysisEmbed(result);
+                const embed = await SequenceFormatter.createAnalysisEmbed(result);
                 await message.reply({ embeds: [embed] });
                 return;
             }
-            // Send detection notification for automatic scans
             if (isAutomatic) {
                 const detectionEmbed = SequenceFormatter.createDetectionEmbed(sequence, message.content.substring(0, 100));
                 const notificationMsg = await message.reply({ embeds: [detectionEmbed] });
-                // Start analysis and update the notification
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    // Update with final results
-                    const finalEmbed = SequenceFormatter.createAnalysisEmbed(result);
+                    const finalEmbed = await SequenceFormatter.createAnalysisEmbed(result);
                     await notificationMsg.edit({ embeds: [finalEmbed] });
                 }
                 catch (error) {
-                    // Update with error
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    const errorEmbed = SequenceFormatter.createErrorEmbed(`Analysis failed: ${errorMessage}`, sequence);
-                    await notificationMsg.edit({ embeds: [errorEmbed] });
+                    // Log error instead of sending Discord message
+                    this.logger.error(`[BIOINFORMATICS] Automatic analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
+                        error: errorMessage,
+                        sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                        method: sequence.extractionMethod,
+                        user: context.userId || 'unknown',
+                        channel: context.channelId || 'unknown',
+                    });
+                    // Delete the notification message instead of showing error
+                    try {
+                        await notificationMsg.delete();
+                    }
+                    catch (deleteError) {
+                        this.logger.error('[BIOINFORMATICS] Failed to delete notification message:', deleteError);
+                    }
                 }
             }
             else {
-                // Manual analysis - show processing message then result
                 const processingMsg = await message.reply("🔄 Analyzing sequence with NCBI BLAST...");
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const embed = SequenceFormatter.createAnalysisEmbed(result);
+                    const embed = await SequenceFormatter.createAnalysisEmbed(result);
                     await processingMsg.edit({ content: '', embeds: [embed] });
                 }
                 catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    const errorEmbed = SequenceFormatter.createErrorEmbed(`Analysis failed: ${errorMessage}`, sequence);
-                    await processingMsg.edit({ content: '', embeds: [errorEmbed] });
+                    this.logger.error(`[BIOINFORMATICS] Manual analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
+                        error: errorMessage,
+                        sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                        method: sequence.extractionMethod,
+                        user: context.userId || 'unknown',
+                        channel: context.channelId || 'unknown',
+                    });
+                    try {
+                        await processingMsg.delete();
+                    }
+                    catch (deleteError) {
+                        this.logger.error('[BIOINFORMATICS] Failed to delete processing message:', deleteError);
+                    }
                 }
             }
         }
         catch (error) {
-            this.logger.error('Error processing sequence:', error);
-            if (!isAutomatic) {
-                const errorEmbed = SequenceFormatter.createErrorEmbed("An unexpected error occurred during analysis.");
-                await message.reply({ embeds: [errorEmbed] });
-            }
+            // Log all sequence processing errors without sending Discord messages
+            this.logger.error(`[BIOINFORMATICS] Sequence processing error (${isAutomatic ? 'automatic' : 'manual'}):`, {
+                error: error instanceof Error ? error.message : String(error),
+                sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                sequenceLength: sequence.cleaned?.length || sequence.raw?.length,
+                method: sequence.extractionMethod,
+                user: context.userId || 'unknown',
+                channel: context.channelId || 'unknown',
+                isAutomatic
+            });
         }
     }
-    /**
-     * Perform BLAST analysis on sequence
-     */
     async analyzeSequence(sequence, context) {
         const startTime = Date.now();
-        // Submit to BLAST API
         const blastResults = await this.blastClient.analyzeSequence(sequence);
-        // Process results into species matches
         const topMatches = blastResults.hits.slice(0, 5).map(hit => ({
             species: hit.scientificName,
             commonName: hit.commonName,
@@ -186,7 +173,6 @@ export class BioinformaticsPlugin {
             description: hit.description,
             taxonId: hit.taxonId
         }));
-        // Calculate overall confidence
         const confidence = this.calculateOverallConfidence(sequence, blastResults, topMatches);
         const result = {
             sequence,
@@ -196,18 +182,12 @@ export class BioinformaticsPlugin {
             processingTime: Date.now() - startTime,
             cacheHit: false
         };
-        // Cache the result
         this.cacheManager.cacheResult(sequence, result);
         return result;
     }
-    /**
-     * Calculate confidence score for a BLAST match
-     */
     calculateMatchConfidence(hit) {
         let confidence = 0;
-        // Identity-based score (0-40 points)
         confidence += Math.min(40, hit.identity * 0.4);
-        // E-value based score (0-30 points)
         if (hit.eValue <= 1e-50)
             confidence += 30;
         else if (hit.eValue <= 1e-20)
@@ -220,28 +200,18 @@ export class BioinformaticsPlugin {
             confidence += 10;
         else
             confidence += 5;
-        // Bit score based score (0-20 points)
         confidence += Math.min(20, hit.bitScore / 10);
-        // Coverage based score (0-10 points)
         confidence += Math.min(10, hit.coverage / 10);
         return Math.min(100, confidence);
     }
-    /**
-     * Calculate overall analysis confidence
-     */
     calculateOverallConfidence(sequence, blastResults, matches) {
         let overall = 0;
-        // Extraction quality (0-30 points)
         const extractionQuality = sequence.confidence * 30;
         overall += extractionQuality;
-        // BLAST reliability (0-40 points)
         let blastReliability = 0;
-        if (matches.length > 0) {
-            const topMatch = matches[0];
-            blastReliability = topMatch.confidence * 0.4;
-        }
+        if (matches.length > 0)
+            blastReliability = matches[0].confidence * 0.4;
         overall += blastReliability;
-        // Sequence validity (0-30 points)
         let sequenceValidity = 0;
         if (sequence.length >= 50)
             sequenceValidity += 15;
@@ -256,7 +226,6 @@ export class BioinformaticsPlugin {
         else
             sequenceValidity += 5;
         overall += sequenceValidity;
-        // Determine confidence level
         let level;
         if (overall >= 80)
             level = 'very-high';
@@ -268,21 +237,11 @@ export class BioinformaticsPlugin {
             level = 'low';
         else
             level = 'very-low';
-        return {
-            overall: Math.min(100, overall),
-            extractionQuality,
-            blastReliability,
-            sequenceValidity,
-            level
-        };
+        return { overall: Math.min(100, overall), extractionQuality, blastReliability, sequenceValidity, level };
     }
-    /**
-     * Manual sequence analysis command
-     */
     async manualAnalyze(message, args) {
         if (args.length === 0) {
-            await message.reply("❌ Please provide a DNA sequence to analyze.\n" +
-                "Usage: `!analyze ATCGATCGATCG`");
+            await message.reply("❌ Please provide a DNA sequence to analyze.\nUsage: `!analyze ATCGATCGATCG`");
             return;
         }
         const sequenceText = args.join('').toUpperCase().replace(/[^ATCGWSMKRYBDHVN]/g, '');
@@ -309,18 +268,11 @@ export class BioinformaticsPlugin {
         };
         await this.processSequence(sequence, message, context, false);
     }
-    /**
-     * Show help command
-     */
     async showHelp(message) {
         const embed = SequenceFormatter.createHelpEmbed();
         await message.reply({ embeds: [embed] });
     }
-    /**
-     * Show statistics command (admin only)
-     */
     async showStats(message) {
-        // Basic admin check (you might want to implement proper admin checking)
         if (!message.member?.permissions.has('Administrator')) {
             await message.reply("❌ This command requires administrator permissions.");
             return;
@@ -355,9 +307,6 @@ export class BioinformaticsPlugin {
             .setFooter({ text: `Generated at ${new Date().toLocaleString()}` });
         await message.reply({ embeds: [embed] });
     }
-    /**
-     * Calculate GC content percentage
-     */
     calculateGCContent(sequence) {
         const gcCount = (sequence.match(/[GC]/g) || []).length;
         return sequence.length > 0 ? (gcCount / sequence.length) * 100 : 0;

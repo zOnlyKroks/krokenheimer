@@ -5,41 +5,6 @@ export class BlastApiClient {
     baseUrl = "https://blast.ncbi.nlm.nih.gov/Blast.cgi";
     statusCheckRetries = 3;
     async analyzeSequence(sequence) {
-        const seq = sequence.cleaned || sequence.raw;
-        console.log(`[BLAST] Analyzing sequence of length ${seq.length}`);
-        // Progressive search strategy - try multiple approaches until we find something
-        try {
-            // Try NCBI BLAST first (works best for longer sequences)
-            if (seq.length >= 15) {
-                console.log(`[BLAST] Attempting NCBI BLAST for sequence length ${seq.length}`);
-                return await this.runNCBIBlast(sequence);
-            }
-            else {
-                console.log(`[BLAST] Sequence too short for NCBI BLAST, using fallback methods`);
-            }
-        }
-        catch (error) {
-            console.log(`[BLAST] NCBI BLAST failed: ${error || error}, trying fallbacks`);
-        }
-        // For short sequences or if NCBI BLAST fails, try alternative methods
-        try {
-            console.log(`[BLAST] Attempting UCSC BLAT search`);
-            return await this.runUCSCBlat(sequence);
-        }
-        catch (error) {
-            console.log(`[BLAST] UCSC BLAT failed: ${error || error}, trying next fallback`);
-        }
-        try {
-            console.log(`[BLAST] Attempting AB-BLAST search`);
-            return await this.runABBlast(sequence);
-        }
-        catch (error) {
-            console.log(`[BLAST] AB-BLAST failed: ${error || error}, using last resort`);
-        }
-        // @ts-ignore
-        return undefined;
-    }
-    async runNCBIBlast(sequence) {
         // 1. Submit sequence
         const rid = await this.submitSequence(sequence);
         // 2. Wait until BLAST job is ready (with timeout)
@@ -57,7 +22,7 @@ export class BlastApiClient {
                     break;
                 }
                 else if (status === "WAITING") {
-                    unknownCount = 0;
+                    unknownCount = 0; // Reset unknown counter
                 }
                 else if (status === "UNKNOWN") {
                     unknownCount++;
@@ -80,90 +45,103 @@ export class BlastApiClient {
         return await this.getResults(rid);
     }
     /**
-     * Calculate optimal BLAST parameters based on NCBI's algorithm
-     * This implements the same logic used by the NCBI web interface
+     * Fetch NCBI's recommended parameters for the given sequence
      */
-    getOptimalParameters(seqLength) {
-        let wordSize;
-        let expect;
-        let matchScore = 2;
-        let mismatchScore = -3;
-        let gapCosts = "5 2"; // Gap open, gap extend
-        // NCBI's parameter selection logic based on sequence length
-        if (seqLength < 30) {
-            // Very short sequences - highly sensitive
-            wordSize = 7;
-            expect = "1000";
-            matchScore = 1;
-            mismatchScore = -3;
-            gapCosts = "5 2";
+    async getRecommendedParameters(sequence) {
+        try {
+            const params = new URLSearchParams({
+                CMD: "Info",
+                PROGRAM: "blastn",
+                DATABASE: "nt",
+                QUERY: sequence.substring(0, 100), // Send sample for analysis
+                FORMAT_TYPE: "JSON2"
+            });
+            const response = await fetch(`${this.baseUrl}?${params}`, {
+                method: "POST",
+                headers: { "User-Agent": "Discord-Bot-Genome-Sequencer/1.0" }
+            });
+            if (!response.ok) {
+                console.warn(`[BLAST] Parameter recommendation request failed (${response.status})`);
+                return null;
+            }
+            const text = await response.text();
+            console.log(text);
+            // Parse parameter suggestions from response
+            // NCBI returns recommended values in the Info response
+            const wordSizeMatch = text.match(/WORD_SIZE["\s:=]+(\d+)/i);
+            const expectMatch = text.match(/EXPECT["\s:=]+([\d.e+-]+)/i);
+            const hitlistMatch = text.match(/HITLIST_SIZE["\s:=]+(\d+)/i);
+            if (wordSizeMatch || expectMatch) {
+                const params = {
+                    // @ts-ignore
+                    wordSize: wordSizeMatch ? parseInt(wordSizeMatch[1]) : this.getDefaultWordSize(sequence.length),
+                    // @ts-ignore
+                    expect: expectMatch ? expectMatch[1] : this.getDefaultExpect(sequence.length),
+                    // @ts-ignore
+                    hitlistSize: hitlistMatch ? hitlistMatch[1] : "50",
+                    filter: "F",
+                    dust: "no"
+                };
+                console.log(`[BLAST] Using NCBI recommended parameters:`, params);
+                return params;
+            }
+            return null;
         }
-        else if (seqLength <= 50) {
-            // Short sequences - optimized for somewhat similar sequences
-            wordSize = 7;
-            expect = "1000";
-            matchScore = 1;
-            mismatchScore = -3;
+        catch (error) {
+            console.warn(`[BLAST] Failed to get parameter recommendations:`, error);
+            return null;
         }
-        else if (seqLength <= 100) {
-            // Medium-short sequences
-            wordSize = 11;
-            expect = "10";
-            matchScore = 2;
-            mismatchScore = -3;
-        }
-        else if (seqLength <= 200) {
-            // Medium sequences
-            wordSize = 11;
-            expect = "10";
-        }
-        else if (seqLength <= 500) {
-            // Medium-long sequences
-            wordSize = 11;
-            expect = "10";
-        }
-        else if (seqLength <= 1000) {
-            // Long sequences
-            wordSize = 11;
-            expect = "10";
-        }
-        else if (seqLength <= 5000) {
-            // Very long sequences - can use larger word size for speed
-            wordSize = 28;
-            expect = "10";
-        }
-        else {
-            // Extremely long sequences - maximize speed
-            wordSize = 28;
-            expect = "0.01";
-        }
-        const params = {
-            wordSize,
-            expect,
-            hitlistSize: "100", // Increased from 50 for better results
-            filter: "L", // Use low complexity filter (default NCBI setting)
-            dust: "yes", // Enable DUST filtering for nucleotide sequences
-            matchScore,
-            mismatchScore,
-            gapCosts
-        };
-        console.log(`[BLAST] Auto-adjusted parameters for sequence length ${seqLength}:`, {
-            wordSize: params.wordSize,
-            expect: params.expect,
-            matchScore: params.matchScore,
-            mismatchScore: params.mismatchScore,
-            gapCosts: params.gapCosts
-        });
-        return params;
+    }
+    /**
+     * Get default word size based on sequence length (fallback)
+     */
+    getDefaultWordSize(length) {
+        if (length < 50)
+            return 7; // Short sequences need smaller word size
+        if (length < 200)
+            return 11;
+        if (length < 1000)
+            return 11;
+        return 28; // Long sequences can use larger word size
+    }
+    /**
+     * Get default expect value based on sequence length (fallback)
+     */
+    getDefaultExpect(length) {
+        if (length < 50)
+            return "1000"; // Very permissive for short sequences
+        if (length < 200)
+            return "10";
+        if (length < 1000)
+            return "10";
+        return "0.01"; // More stringent for long sequences
     }
     async submitSequence(sequence) {
         const seq = sequence.cleaned || sequence.raw;
-        // Basic validation - allow short sequences for fallback searches
-        if (!seq || seq.length < 1) {
-            throw new Error("Sequence cannot be empty");
+        // Enforce minimum length
+        if (!seq || seq.length < 10) {
+            throw new Error("Sequence must be at least 10 nucleotides long");
         }
-        // Get optimal parameters based on sequence length
-        const params = this.getOptimalParameters(seq.length);
+        // Try to get NCBI's recommended parameters
+        let params = null;
+        try {
+            params = await this.getRecommendedParameters(seq);
+            console.log(params);
+        }
+        catch (error) {
+            console.warn(`[BLAST] Could not fetch recommended parameters, using defaults`);
+        }
+        // Fall back to manual logic if NCBI doesn't provide recommendations
+        if (!params) {
+            params = {
+                wordSize: this.getDefaultWordSize(seq.length),
+                expect: this.getDefaultExpect(seq.length),
+                hitlistSize: "50",
+                filter: "F",
+                dust: "no"
+            };
+            console.log(`[BLAST] Using default parameters for length ${seq.length}:`, params);
+        }
         const urlParams = new URLSearchParams({
             CMD: "Put",
             PROGRAM: "blastn",
@@ -174,10 +152,7 @@ export class BlastApiClient {
             HITLIST_SIZE: params.hitlistSize,
             WORD_SIZE: params.wordSize.toString(),
             FILTER: params.filter,
-            DUST: params.dust,
-            REWARD: params.matchScore?.toString() || "2",
-            PENALTY: params.mismatchScore?.toString() || "-3",
-            GAPCOSTS: params.gapCosts || "5 2"
+            DUST: params.dust
         });
         const response = await fetch(`${this.baseUrl}?${urlParams}`, {
             method: "POST",
@@ -489,207 +464,6 @@ export class BlastApiClient {
     sleep(ms) {
         return new Promise(r => setTimeout(r, ms));
     }
-    /* ------------------------------------------------------------------ */
-    /* UCSC BLAT FALLBACK METHOD                                           */
-    /* ------------------------------------------------------------------ */
-    async runUCSCBlat(sequence) {
-        const seq = sequence.cleaned || sequence.raw;
-        console.log(`[BLAT] Running UCSC BLAT search for sequence: ${seq.substring(0, 20)}...`);
-        const blatUrl = "https://genome.ucsc.edu/cgi-bin/hgBlat";
-        // BLAT form parameters
-        const formData = new URLSearchParams({
-            'userSeq': seq,
-            'type': 'DNA',
-            'db': 'hg38', // Human genome
-            'output': 'psl' // PSL format for easier parsing
-        });
-        try {
-            const response = await fetch(blatUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'Discord-Bot-Genome-Sequencer/1.0'
-                },
-                body: formData
-            });
-            if (!response.ok) {
-                throw new Error(`BLAT request failed: ${response.status}`);
-            }
-            const resultText = await response.text();
-            // Parse BLAT results
-            return this.parseBlatResults(seq, resultText);
-        }
-        catch (error) {
-            throw new Error(`UCSC BLAT failed: ${error}`);
-        }
-    }
-    parseBlatResults(sequence, blatOutput) {
-        const results = {
-            requestId: `blat-${Date.now()}`,
-            querySequence: sequence,
-            queryLength: sequence.length,
-            database: "UCSC BLAT (hg38)",
-            program: "blat",
-            hits: [],
-            timestamp: Date.now(),
-            executionTime: 0,
-            status: "completed"
-        };
-        try {
-            // Parse PSL format results (tab-separated)
-            const lines = blatOutput.split('\n');
-            for (const line of lines) {
-                if (line.startsWith('http') || line.includes('align')) {
-                    // This is likely an alignment URL or header - extract match info
-                    const matches = line.match(/(\d+)\s+matches/i);
-                    if (matches) {
-                        const hit = {
-                            accession: `BLAT_MATCH_${results.hits.length + 1}`,
-                            description: `UCSC BLAT match on human genome (${matches[1]} bp match)`,
-                            scientificName: "Homo sapiens",
-                            commonName: "human",
-                            // @ts-ignore
-                            eValue: parseFloat(matches[1]) / sequence.length, // Rough E-value estimate
-                            // @ts-ignore
-                            bitScore: parseFloat(matches[1]) * 2, // Rough bit score
-                            // @ts-ignore
-                            identity: Math.min(95, (parseFloat(matches[1]) / sequence.length) * 100),
-                            // @ts-ignore
-                            coverage: Math.min(100, (parseFloat(matches[1]) / sequence.length) * 100),
-                            // @ts-ignore
-                            alignmentLength: parseFloat(matches[1]),
-                            // @ts-ignore
-                            taxonId: "9606" // Human taxonomy ID
-                        };
-                        results.hits.push(hit);
-                    }
-                }
-            }
-            // If no specific matches found, create a generic result
-            if (results.hits.length === 0) {
-                const hit = {
-                    accession: "BLAT_HUMAN_GENOME",
-                    description: "Potential match in human genome sequence",
-                    scientificName: "Homo sapiens",
-                    commonName: "human",
-                    eValue: 0.1,
-                    bitScore: sequence.length * 1.5,
-                    identity: 75,
-                    coverage: 60,
-                    alignmentLength: sequence.length,
-                    // @ts-ignore
-                    taxonId: "9606"
-                };
-                results.hits.push(hit);
-            }
-        }
-        catch (error) {
-            console.warn(`[BLAT] Error parsing results: ${error}`);
-            // Fallback hit
-            results.hits.push({
-                accession: "BLAT_FALLBACK",
-                description: "UCSC BLAT search completed",
-                scientificName: "Homo sapiens",
-                commonName: "human",
-                eValue: 1.0,
-                bitScore: 30,
-                identity: 70,
-                coverage: 50,
-                alignmentLength: sequence.length,
-                // @ts-ignore
-                taxonId: "9606"
-            });
-        }
-        return results;
-    }
-    /* ------------------------------------------------------------------ */
-    /* AB-BLAST FALLBACK METHOD                                            */
-    /* ------------------------------------------------------------------ */
-    async runABBlast(sequence) {
-        const seq = sequence.cleaned || sequence.raw;
-        console.log(`[AB-BLAST] Simulating AB-BLAST search for sequence: ${seq.substring(0, 20)}...`);
-        // Since AB-BLAST is a commercial tool and we don't have direct API access,
-        // we'll create a simulated result based on sequence characteristics
-        const results = {
-            requestId: `ab-blast-${Date.now()}`,
-            querySequence: seq,
-            queryLength: seq.length,
-            database: "AB-BLAST Simulation",
-            program: "ab-blastn",
-            hits: [],
-            timestamp: Date.now(),
-            executionTime: 0,
-            status: "completed"
-        };
-        // Generate hits based on sequence composition
-        const gcContent = this.calculateGCContent(seq);
-        if (gcContent > 0.6) {
-            // High GC content - likely bacterial
-            results.hits.push({
-                accession: "AB_BACTERIAL",
-                description: "High GC content bacterial sequence match",
-                scientificName: "Streptomyces coelicolor",
-                commonName: "soil bacterium",
-                eValue: 0.01,
-                bitScore: seq.length * 2,
-                identity: 85,
-                coverage: 90,
-                alignmentLength: seq.length,
-                // @ts-ignore
-                taxonId: "100226"
-            });
-        }
-        else if (gcContent < 0.3) {
-            // Low GC content - likely viral or parasitic
-            results.hits.push({
-                accession: "AB_VIRAL",
-                description: "Low GC content viral sequence match",
-                scientificName: "Plasmodium falciparum",
-                commonName: "malaria parasite",
-                eValue: 0.05,
-                bitScore: seq.length * 1.8,
-                identity: 80,
-                coverage: 85,
-                alignmentLength: seq.length,
-                // @ts-ignore
-                taxonId: "5833"
-            });
-        }
-        else {
-            // Normal GC content - could be mammalian
-            results.hits.push({
-                accession: "AB_MAMMAL",
-                description: "Mammalian genome sequence match",
-                scientificName: "Mus musculus",
-                commonName: "house mouse",
-                eValue: 0.1,
-                bitScore: seq.length * 1.5,
-                identity: 78,
-                coverage: 75,
-                alignmentLength: seq.length,
-                // @ts-ignore
-                taxonId: "10090"
-            });
-        }
-        // Add a secondary hit for diversity
-        results.hits.push({
-            accession: "AB_CONSERVED",
-            description: "Conserved genetic element",
-            scientificName: "Saccharomyces cerevisiae",
-            commonName: "baker's yeast",
-            eValue: 0.5,
-            bitScore: seq.length,
-            identity: 65,
-            coverage: 60,
-            alignmentLength: Math.floor(seq.length * 0.8),
-            // @ts-ignore
-            taxonId: "4932"
-        });
-        return results;
-    }
-    calculateGCContent(sequence) {
-        const gcCount = (sequence.match(/[GC]/gi) || []).length;
-        return gcCount / sequence.length;
-    }
 }
+//# sourceMappingURL=BlastApiClient.js.map
 //# sourceMappingURL=BlastApiClient.js.map

@@ -1,2 +1,2 @@
-import { Message, Client } from "discord.js";
+export {};
 //# sourceMappingURL=index.js.map

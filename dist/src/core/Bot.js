@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Message } from "discord.js";
+import { Client, GatewayIntentBits } from "discord.js";
 import { Logger } from "./util/logger.js";
 export class ExtensibleBot {
     client;

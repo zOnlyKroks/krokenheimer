@@ -1,7 +1,6 @@
 import { EmbedBuilder } from "discord.js";
 import { SequenceDetector } from "../services/SequenceDetector.js";
 import { BlastApiClient } from "../services/BlastApiClient.js";
-import { SequenceCacheManager } from "../services/SequenceCache.js";
 import { SequenceFormatter } from "../utils/SequenceFormatter.js";
 import { Logger } from "../core/util/logger.js";
 export class BioinformaticsPlugin {
@@ -10,7 +9,6 @@ export class BioinformaticsPlugin {
     version = "1.0.1";
     sequenceDetector = new SequenceDetector();
     blastClient = new BlastApiClient();
-    cacheManager = new SequenceCacheManager();
     logger = new Logger();
     // Analysis options
     analysisOptions = {
@@ -52,7 +50,6 @@ export class BioinformaticsPlugin {
         this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
     }
     async cleanup() {
-        this.cacheManager.destroy();
         this.logger.info('BioinformaticsPlugin cleanup completed');
     }
     async scanMessage(message) {
@@ -82,20 +79,7 @@ export class BioinformaticsPlugin {
     }
     async processSequence(sequence, message, context, isAutomatic = false) {
         try {
-            const rateLimitCheck = this.cacheManager.canUserAnalyze(context);
-            if (!rateLimitCheck.allowed) {
-                if (!isAutomatic) {
-                    const embed = SequenceFormatter.createRateLimitEmbed(rateLimitCheck.resetTime);
-                    await message.reply({ embeds: [embed] });
-                }
-                return;
-            }
-            let result = this.cacheManager.getCachedResult(sequence);
-            if (result) {
-                const embed = await SequenceFormatter.createAnalysisEmbed(result);
-                await message.reply({ embeds: [embed] });
-                return;
-            }
+            let result;
             if (isAutomatic) {
                 const detectionEmbed = SequenceFormatter.createDetectionEmbed(sequence, message.content.substring(0, 100));
                 const notificationMsg = await message.reply({ embeds: [detectionEmbed] });
@@ -182,7 +166,6 @@ export class BioinformaticsPlugin {
             processingTime: Date.now() - startTime,
             cacheHit: false
         };
-        this.cacheManager.cacheResult(sequence, result);
         return result;
     }
     calculateMatchConfidence(hit) {
@@ -277,25 +260,10 @@ export class BioinformaticsPlugin {
             await message.reply("❌ This command requires administrator permissions.");
             return;
         }
-        const stats = this.cacheManager.getStats();
         const embed = new EmbedBuilder()
             .setTitle("📊 Bioinformatics Plugin Statistics")
             .setColor(0x0099ff)
             .addFields([
-            {
-                name: "🗄️ Cache",
-                value: `**Entries**: ${stats.cache.size}\n` +
-                    `**Total Hits**: ${stats.cache.hitCount}\n` +
-                    `**Oldest Entry**: ${stats.cache.oldestEntry ? new Date(stats.cache.oldestEntry).toLocaleString() : 'None'}`,
-                inline: true
-            },
-            {
-                name: "⚡ Rate Limiting",
-                value: `**Active Users**: ${stats.rateLimit.activeUsers}\n` +
-                    `**Total Requests**: ${stats.rateLimit.totalRequestsInWindow}\n` +
-                    `**Avg per User**: ${stats.rateLimit.averageRequestsPerUser.toFixed(1)}`,
-                inline: true
-            },
             {
                 name: "🔧 Settings",
                 value: `**Min Length**: ${this.analysisOptions.minSequenceLength} bp\n` +

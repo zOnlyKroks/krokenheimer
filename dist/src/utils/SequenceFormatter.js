@@ -1,4 +1,5 @@
-import { EmbedBuilder, AttachmentBuilder } from "discord.js";
+import { EmbedBuilder } from "discord.js";
+import { SpeciesImageService } from "../services/SpeciesImageService.js";
 /**
  * Formats bioinformatics analysis results for Discord
  */
@@ -6,7 +7,7 @@ export class SequenceFormatter {
     /**
      * Create main analysis result embed
      */
-    static createAnalysisEmbed(result) {
+    static async createAnalysisEmbed(result) {
         const embed = new EmbedBuilder()
             .setTitle("🧬 DNA Sequence Analysis")
             .setColor(this.getConfidenceColor(result.confidence))
@@ -40,6 +41,18 @@ export class SequenceFormatter {
                         inline: false
                     }
                 ]);
+                // Try to fetch and add species image
+                try {
+                    const imageUrl = await SpeciesImageService.getSpeciesImage(topMatch.species, topMatch.commonName || undefined);
+                    if (imageUrl) {
+                        // Set as thumbnail for a cleaner look (smaller image in top-right)
+                        embed.setThumbnail(imageUrl);
+                    }
+                }
+                catch (error) {
+                    // Silently fail if image fetching fails - don't break the embed
+                    console.warn(`Failed to fetch image for species ${topMatch.species}:`, error);
+                }
             }
             // Additional matches if available
             if (result.topMatches.length > 1) {
@@ -84,7 +97,7 @@ export class SequenceFormatter {
      * Create a simple notification embed for automatic detection
      */
     static createDetectionEmbed(sequence, extractedFrom) {
-        const embed = new EmbedBuilder()
+        return new EmbedBuilder()
             .setTitle("🧬 DNA Sequence Detected!")
             .setColor(0x00ff00)
             .setDescription(`I found a DNA sequence in your message! Analyzing ${sequence.length} nucleotides...`)
@@ -106,7 +119,6 @@ export class SequenceFormatter {
             }
         ])
             .setFooter({ text: "Results will be posted shortly • Powered by NCBI BLAST" });
-        return embed;
     }
     /**
      * Create error embed
@@ -343,58 +355,7 @@ export class SequenceFormatter {
     static createFooter(result) {
         const timestamp = new Date().toLocaleString();
         const cacheText = result.cacheHit ? ' • Cached result' : '';
-        return `Generated with Claude Code • ${timestamp}${cacheText}`;
-    }
-    /**
-     * Create a detailed alignment view (for manual analysis)
-     */
-    static createAlignmentEmbed(result, hit) {
-        const embed = new EmbedBuilder()
-            .setTitle("🔍 Detailed Alignment View")
-            .setColor(0x0099ff)
-            .addFields([
-            {
-                name: "Species",
-                value: `**${hit.scientificName}**${hit.commonName ? ` (${hit.commonName})` : ''}`,
-                inline: false
-            },
-            {
-                name: "Statistics",
-                value: `**Identity**: ${hit.identity.toFixed(2)}%\n` +
-                    `**Coverage**: ${hit.coverage.toFixed(2)}%\n` +
-                    `**Bit Score**: ${hit.bitScore.toFixed(1)}\n` +
-                    `**E-value**: ${this.formatEValue(hit.eValue)}`,
-                inline: true
-            },
-            {
-                name: "Alignment",
-                value: `**Length**: ${hit.alignmentLength} bp\n` +
-                    `**Accession**: ${hit.accession}`,
-                inline: true
-            }
-        ]);
-        if (hit.description.length > 0) {
-            embed.addFields([
-                {
-                    name: "Description",
-                    value: hit.description.substring(0, 1000),
-                    inline: false
-                }
-            ]);
-        }
-        return embed;
-    }
-    /**
-     * Format a sequence for display (with line breaks)
-     */
-    static formatSequenceDisplay(sequence, lineLength = 60) {
-        const lines = [];
-        for (let i = 0; i < sequence.length; i += lineLength) {
-            const line = sequence.substring(i, i + lineLength);
-            const pos = (i + 1).toString().padStart(6);
-            lines.push(`${pos} ${line}`);
-        }
-        return '```\n' + lines.join('\n') + '\n```';
+        return `Generated • ${timestamp}${cacheText}`;
     }
 }
 //# sourceMappingURL=SequenceFormatter.js.map

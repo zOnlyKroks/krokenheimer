@@ -11,7 +11,6 @@ import type {
 
 import { SequenceDetector } from "../services/SequenceDetector.js";
 import { BlastApiClient } from "../services/BlastApiClient.js";
-import { SequenceCacheManager } from "../services/SequenceCache.js";
 import { SequenceFormatter } from "../utils/SequenceFormatter.js";
 import { Logger } from "../core/util/logger.js";
 
@@ -22,7 +21,6 @@ export class BioinformaticsPlugin implements BotPlugin {
 
     private sequenceDetector = new SequenceDetector();
     private blastClient = new BlastApiClient();
-    private cacheManager = new SequenceCacheManager();
     private logger = new Logger();
 
     // Analysis options
@@ -69,7 +67,6 @@ export class BioinformaticsPlugin implements BotPlugin {
     }
 
     async cleanup(): Promise<void> {
-        this.cacheManager.destroy();
         this.logger.info('BioinformaticsPlugin cleanup completed');
     }
 
@@ -110,21 +107,7 @@ export class BioinformaticsPlugin implements BotPlugin {
         isAutomatic: boolean = false
     ): Promise<void> {
         try {
-            const rateLimitCheck = this.cacheManager.canUserAnalyze(context);
-            if (!rateLimitCheck.allowed) {
-                if (!isAutomatic) {
-                    const embed = SequenceFormatter.createRateLimitEmbed(rateLimitCheck.resetTime!);
-                    await message.reply({ embeds: [embed] });
-                }
-                return;
-            }
-
-            let result = this.cacheManager.getCachedResult(sequence);
-            if (result) {
-                const embed = await SequenceFormatter.createAnalysisEmbed(result);
-                await message.reply({ embeds: [embed] });
-                return;
-            }
+            let result;
 
             if (isAutomatic) {
                 const detectionEmbed = SequenceFormatter.createDetectionEmbed(sequence, message.content.substring(0, 100));
@@ -217,7 +200,6 @@ export class BioinformaticsPlugin implements BotPlugin {
             cacheHit: false
         };
 
-        this.cacheManager.cacheResult(sequence, result);
         return result;
     }
 
@@ -315,25 +297,10 @@ export class BioinformaticsPlugin implements BotPlugin {
             return;
         }
 
-        const stats = this.cacheManager.getStats();
         const embed = new EmbedBuilder()
             .setTitle("📊 Bioinformatics Plugin Statistics")
             .setColor(0x0099ff)
             .addFields([
-                {
-                    name: "🗄️ Cache",
-                    value: `**Entries**: ${stats.cache.size}\n` +
-                        `**Total Hits**: ${stats.cache.hitCount}\n` +
-                        `**Oldest Entry**: ${stats.cache.oldestEntry ? new Date(stats.cache.oldestEntry).toLocaleString() : 'None'}`,
-                    inline: true
-                },
-                {
-                    name: "⚡ Rate Limiting",
-                    value: `**Active Users**: ${stats.rateLimit.activeUsers}\n` +
-                        `**Total Requests**: ${stats.rateLimit.totalRequestsInWindow}\n` +
-                        `**Avg per User**: ${stats.rateLimit.averageRequestsPerUser.toFixed(1)}`,
-                    inline: true
-                },
                 {
                     name: "🔧 Settings",
                     value: `**Min Length**: ${this.analysisOptions.minSequenceLength} bp\n` +

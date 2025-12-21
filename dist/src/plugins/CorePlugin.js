@@ -1,4 +1,3 @@
-import { Client, Message } from "discord.js";
 export class CorePlugin {
     name = "CorePlugin";
     description = "Core bot functionality";
