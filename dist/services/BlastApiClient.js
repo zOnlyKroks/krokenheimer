@@ -165,26 +165,32 @@ export class BlastApiClient {
             if (jsonResponse.ok) {
                 const jsonText = await jsonResponse.text();
                 console.log(`[BLAST] Got JSON response, length: ${jsonText.length}`);
-                try {
-                    const data = JSON.parse(jsonText);
-                    console.log(`[BLAST] Parsed JSON successfully`);
-                    // Try to parse the JSON structure
-                    const result = this.parseBlastJSON(rid, seq, data);
-                    if (result.hits.length > 0) {
-                        console.log(`[BLAST] Found ${result.hits.length} hits in JSON`);
-                        return result;
+                // Check if it's actually JSON (not HTML or plain text)
+                if (jsonText.trim().startsWith('{') || jsonText.trim().startsWith('[')) {
+                    try {
+                        const data = JSON.parse(jsonText);
+                        console.log(`[BLAST] Parsed JSON successfully`);
+                        // Try to parse the JSON structure
+                        const result = this.parseBlastJSON(rid, seq, data);
+                        if (result.hits.length > 0) {
+                            console.log(`[BLAST] Found ${result.hits.length} hits in JSON`);
+                            return result;
+                        }
+                        console.log(`[BLAST] No hits in JSON, trying XML format`);
                     }
-                    console.log(`[BLAST] No hits in JSON, trying text format`);
+                    catch (err) {
+                        console.warn(`[BLAST] JSON parse failed: ${err}`);
+                    }
                 }
-                catch (err) {
-                    console.warn(`[BLAST] JSON parse failed: ${err}`);
+                else {
+                    console.log(`[BLAST] Response is not JSON format, skipping to XML`);
                 }
             }
         }
         catch (err) {
             console.warn(`[BLAST] JSON fetch failed: ${err}`);
         }
-        // Fallback to XML format
+        // Fallback to XML format (more reliable)
         const xmlUrl = `${this.baseUrl}?CMD=Get&RID=${rid}&FORMAT_TYPE=XML&ALIGNMENTS=50&DESCRIPTIONS=50`;
         const response = await fetch(xmlUrl, {
             headers: {
@@ -195,8 +201,8 @@ export class BlastApiClient {
             throw new Error(`Failed to fetch results: ${response.status}`);
         }
         const resultText = await response.text();
-        console.log(`[BLAST] Got XML/text response, length: ${resultText.length}`);
-        // Try parsing as text format
+        console.log(`[BLAST] Got XML response, length: ${resultText.length}`);
+        // Parse XML format
         return this.parseTextResults(rid, seq, resultText);
     }
     parseBlastJSON(rid, seq, data) {
@@ -395,6 +401,11 @@ export class BlastApiClient {
                 // @ts-ignore
                 if (commonMatch)
                     commonName = commonMatch[1];
+                // FILTER OUT "Unknown species" hits - they're not useful
+                if (scientificName === "Unknown species" && !commonName) {
+                    console.log(`[BLAST] Filtering out unknown species hit: ${accession}`);
+                    continue;
+                }
                 // Calculate identity percentage
                 // @ts-ignore
                 const alignLen = alignLenMatch ? parseInt(alignLenMatch[1]) : 0;
@@ -425,16 +436,19 @@ export class BlastApiClient {
                     taxonId: undefined
                 };
                 hits.push(hit);
-                console.log(`[BLAST] Parsed XML hit: ${hit.accession} - ${hit.scientificName} (${hit.identity.toFixed(1)}% identity)`);
+                console.log(`[BLAST] Parsed XML hit: ${hit.accession} - ${hit.scientificName} (${hit.identity.toFixed(1)}% identity, ${hit.coverage.toFixed(1)}% coverage)`);
             }
             catch (err) {
                 console.warn(`[BLAST] Failed to parse XML hit block: ${err}`);
             }
         }
-        console.log(`[BLAST] Successfully parsed ${hits.length} hits from XML`);
+        console.log(`[BLAST] Successfully parsed ${hits.length} hits from XML (after filtering)`);
         if (hits.length > 0) {
             // @ts-ignore
-            console.log(`[BLAST] First hit: ${hits[0].accession} - ${hits[0].scientificName}`);
+            console.log(`[BLAST] Top hit: ${hits[0].accession} - ${hits[0].scientificName}`);
+        }
+        else {
+            console.log(`[BLAST] No valid species matches found after filtering`);
         }
         return {
             requestId: rid,
