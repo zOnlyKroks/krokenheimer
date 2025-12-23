@@ -40,7 +40,6 @@ export interface SpeciesIdentification {
   topMatches: SpeciesMatch[];     // Processed top species matches
   confidence: ConfidenceLevel;    // Overall confidence assessment
   processingTime: number;         // Total time for analysis (milliseconds)
-  cacheHit: boolean;              // Whether result came from cache
 }
 
 export interface SpeciesMatch {
