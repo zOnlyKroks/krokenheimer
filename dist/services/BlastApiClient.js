@@ -6,9 +6,6 @@ export class BlastApiClient {
        ====================================================================== */
     async analyzeSequence(sequence) {
         const seq = sequence.cleaned || sequence.raw;
-        if (!seq || seq.length < 20) {
-            throw new Error(`Sequence too short: ${seq?.length ?? 0} bp (minimum 20 for BLAST)`);
-        }
         // Validate DNA sequence
         const validDNA = /^[ATCGNatcgn]+$/i.test(seq);
         if (!validDNA) {

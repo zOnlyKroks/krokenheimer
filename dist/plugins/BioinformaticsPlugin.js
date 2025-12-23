@@ -22,20 +22,6 @@ export class BioinformaticsPlugin {
     };
     commands = [
         {
-            name: "analyze",
-            description: "Manually analyze a DNA sequence",
-            usage: "!analyze <DNA sequence>",
-            aliases: ["seq", "dna"],
-            cooldown: 10,
-            execute: this.manualAnalyze.bind(this)
-        },
-        {
-            name: "biohelp",
-            description: "Show bioinformatics help",
-            aliases: ["genomehelp", "seqhelp"],
-            execute: this.showHelp.bind(this)
-        },
-        {
             name: "biostats",
             description: "Show analysis statistics (admin only)",
             execute: this.showStats.bind(this)
@@ -43,9 +29,11 @@ export class BioinformaticsPlugin {
     ];
     async initialize(client, bot) {
         client.on("messageCreate", (message) => {
-            this.scanMessage(message).catch(error => {
-                this.logger.error('Error in message scanning:', error);
-            });
+            if (Math.random() <= 0.1) {
+                this.scanMessage(message).catch(error => {
+                    this.logger.error('Error in message scanning:', error);
+                });
+            }
         });
         this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
     }
@@ -71,77 +59,55 @@ export class BioinformaticsPlugin {
             // Only process the best sequence automatically
             const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];
             // @ts-ignore
-            await this.processSequence(bestSequence, message, context, true);
+            await this.processSequence(bestSequence, message, context);
         }
         catch (error) {
             this.logger.error('Error in automatic sequence scanning:', error);
         }
     }
-    async processSequence(sequence, message, context, isAutomatic = false) {
+    async processSequence(sequence, message, context) {
         try {
             let result;
-            if (isAutomatic) {
-                const detectionEmbed = SequenceFormatter.createDetectionEmbed(sequence, message.content.substring(0, 100));
-                const notificationMsg = await message.reply({ embeds: [detectionEmbed] });
-                try {
-                    result = await this.analyzeSequence(sequence, context);
-                    const finalEmbed = await SequenceFormatter.createSimpleAnalysisEmbed(result);
-                    await notificationMsg.edit({ embeds: [finalEmbed] });
+            const detectionEmbed = SequenceFormatter.createDetectionEmbed(sequence, message.content.substring(0, 100));
+            const notificationMsg = await message.reply({ embeds: [detectionEmbed] });
+            try {
+                result = await this.analyzeSequence(sequence, context);
+                // If no matches found, delete the message to avoid clutter
+                if (result.topMatches.length === 0) {
+                    await notificationMsg.delete();
+                    return;
                 }
-                catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    // Log error instead of sending Discord message
-                    this.logger.error(`[BIOINFORMATICS] Automatic analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
-                        error: errorMessage,
-                        sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
-                        method: sequence.extractionMethod,
-                        user: context.userId || 'unknown',
-                        channel: context.channelId || 'unknown',
-                    });
-                    // Delete the notification message instead of showing error
-                    try {
-                        await notificationMsg.delete();
-                    }
-                    catch (deleteError) {
-                        this.logger.error('[BIOINFORMATICS] Failed to delete notification message:', deleteError);
-                    }
-                }
+                const finalEmbed = await SequenceFormatter.createSimpleAnalysisEmbed(result);
+                await notificationMsg.edit({ embeds: [finalEmbed] });
             }
-            else {
-                const processingMsg = await message.reply("🔄 Analyzing sequence with NCBI BLAST...");
+            catch (error) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                // Log error instead of sending Discord message
+                this.logger.error(`[BIOINFORMATICS] Automatic analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
+                    error: errorMessage,
+                    sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                    method: sequence.extractionMethod,
+                    user: context.userId || 'unknown',
+                    channel: context.channelId || 'unknown',
+                });
+                // Delete the notification message instead of showing error
                 try {
-                    result = await this.analyzeSequence(sequence, context);
-                    const embed = await SequenceFormatter.createSimpleAnalysisEmbed(result);
-                    await processingMsg.edit({ content: '', embeds: [embed] });
+                    await notificationMsg.delete();
                 }
-                catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-                    this.logger.error(`[BIOINFORMATICS] Manual analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
-                        error: errorMessage,
-                        sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
-                        method: sequence.extractionMethod,
-                        user: context.userId || 'unknown',
-                        channel: context.channelId || 'unknown',
-                    });
-                    try {
-                        await processingMsg.delete();
-                    }
-                    catch (deleteError) {
-                        this.logger.error('[BIOINFORMATICS] Failed to delete processing message:', deleteError);
-                    }
+                catch (deleteError) {
+                    this.logger.error('[BIOINFORMATICS] Failed to delete notification message:', deleteError);
                 }
             }
         }
         catch (error) {
             // Log all sequence processing errors without sending Discord messages
-            this.logger.error(`[BIOINFORMATICS] Sequence processing error (${isAutomatic ? 'automatic' : 'manual'}):`, {
+            this.logger.error(`[BIOINFORMATICS] Sequence processing error (automatic):`, {
                 error: error instanceof Error ? error.message : String(error),
                 sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
                 sequenceLength: sequence.cleaned?.length || sequence.raw?.length,
                 method: sequence.extractionMethod,
                 user: context.userId || 'unknown',
-                channel: context.channelId || 'unknown',
-                isAutomatic
+                channel: context.channelId || 'unknown'
             });
         }
     }
@@ -158,15 +124,13 @@ export class BioinformaticsPlugin {
             taxonId: hit.taxonId
         }));
         const confidence = this.calculateOverallConfidence(sequence, blastResults, topMatches);
-        const result = {
+        return {
             sequence,
             blastResults,
             topMatches,
             confidence,
-            processingTime: Date.now() - startTime,
-            cacheHit: false
+            processingTime: Date.now() - startTime
         };
-        return result;
     }
     calculateMatchConfidence(hit) {
         let confidence = 0;
@@ -249,11 +213,7 @@ export class BioinformaticsPlugin {
             messageId: message.id,
             timestamp: message.createdTimestamp
         };
-        await this.processSequence(sequence, message, context, false);
-    }
-    async showHelp(message) {
-        const embed = SequenceFormatter.createHelpEmbed();
-        await message.reply({ embeds: [embed] });
+        await this.processSequence(sequence, message, context);
     }
     async showStats(message) {
         if (!message.member?.permissions.has('Administrator')) {
