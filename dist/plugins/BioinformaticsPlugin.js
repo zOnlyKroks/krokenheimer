@@ -114,7 +114,7 @@ export class BioinformaticsPlugin {
     async analyzeSequence(sequence, context) {
         const startTime = Date.now();
         const blastResults = await this.blastClient.analyzeSequence(sequence);
-        const topMatches = blastResults.hits.slice(0, 5).map(hit => ({
+        const topMatches = blastResults.hits.slice(0, 1).map(hit => ({
             species: hit.scientificName,
             commonName: hit.commonName,
             confidence: this.calculateMatchConfidence(hit),

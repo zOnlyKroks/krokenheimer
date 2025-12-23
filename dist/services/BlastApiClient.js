@@ -51,7 +51,7 @@ export class BlastApiClient {
             QUERY: seq.toUpperCase(),
             FILTER: "L",
             EXPECT: "1000", // Increased for short sequences
-            HITLIST_SIZE: "50",
+            HITLIST_SIZE: "15",
             WORD_SIZE: seq.length < 50 ? "7" : "11", // Smaller word size for short sequences
             FORMAT_TYPE: "XML"
         });
@@ -256,7 +256,7 @@ export class BlastApiClient {
     parseHitsFromJSON(hits, seq) {
         const parsedHits = [];
         console.log(`[BLAST] Parsing ${hits.length} hits`);
-        for (const hit of hits.slice(0, 20)) {
+        for (const hit of hits.slice(0, 10)) {
             try {
                 const desc = hit.description?.[0] || {};
                 const hsp = hit.hsps?.[0];
@@ -356,7 +356,7 @@ export class BlastApiClient {
             queryLength: seq.length,
             database: "nt",
             program: "blastn",
-            hits: hits.slice(0, 10),
+            hits: hits.slice(0, 3),
             timestamp: Date.now(),
             executionTime: 0,
             status: "completed"
@@ -368,7 +368,7 @@ export class BlastApiClient {
         // Extract all <Hit> blocks using regex
         const hitBlocks = xml.match(/<Hit>[\s\S]*?<\/Hit>/g) || [];
         console.log(`[BLAST] Found ${hitBlocks.length} <Hit> blocks in XML`);
-        for (const hitBlock of hitBlocks.slice(0, 50)) { // Check more hits to find unique species
+        for (const hitBlock of hitBlocks.slice(0, 15)) { // Check more hits to find unique species
             try {
                 // Extract key fields from XML
                 const accMatch = hitBlock.match(/<Hit_accession>(.*?)<\/Hit_accession>/);
@@ -412,7 +412,7 @@ export class BlastApiClient {
                 }
                 seenSpecies.add(speciesKey);
                 // Stop if we have enough unique species
-                if (hits.length >= 10) {
+                if (hits.length >= 3) {
                     break;
                 }
                 // Calculate identity percentage
@@ -467,7 +467,7 @@ export class BlastApiClient {
             queryLength: seq.length,
             database: "nt",
             program: "blastn",
-            hits: hits.slice(0, 10),
+            hits: hits.slice(0, 3),
             timestamp: Date.now(),
             executionTime: 0,
             status: "completed"
@@ -603,7 +603,7 @@ export class BlastApiClient {
             queryLength: seq.length,
             database: "ena_sequence",
             program: "blastn",
-            hits: hits.slice(0, 10),
+            hits: hits.slice(0, 3),
             timestamp: Date.now(),
             executionTime: 0,
             status: "completed"

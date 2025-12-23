@@ -23,31 +23,29 @@ export class SequenceFormatter {
                 inline: false
             }
         ]);
-        // Top 4 matches with percentages and descriptions
+        // Show only the top species match
         if (result.topMatches.length > 0) {
-            const topMatches = result.topMatches.slice(0, 4);
-            const matchesText = topMatches.map((match, index) => {
-                const commonName = match.commonName ? ` (${match.commonName})` : '';
-                const description = match.description ? ` - ${match.description}` : '';
-                return `${index + 1}. **${match.species}**${commonName} - ${match.identity.toFixed(1)}%${description}`;
-            }).join('\n\n');
-            embed.addFields([
-                {
-                    name: "Top Matches",
-                    value: matchesText,
-                    inline: false
-                }
-            ]);
+            const topMatch = result.topMatches[0];
+            if (topMatch) {
+                const commonName = topMatch.commonName ? ` (${topMatch.commonName})` : '';
+                const description = topMatch.description ? ` - ${topMatch.description}` : '';
+                const matchText = `**${topMatch.species}**${commonName} - ${topMatch.identity.toFixed(1)}%${description}`;
+                embed.addFields([
+                    {
+                        name: "Species Match",
+                        value: matchText,
+                        inline: false
+                    }
+                ]);
+            }
             // Add species image for top match
             try {
                 const topMatch = result.topMatches[0];
-                const imageUrl = await SpeciesImageService.getSpeciesImage(
-                // @ts-ignore
-                topMatch.species, 
-                // @ts-ignore
-                topMatch.commonName || undefined);
-                if (imageUrl) {
-                    embed.setThumbnail(imageUrl);
+                if (topMatch) {
+                    const imageUrl = await SpeciesImageService.getSpeciesImage(topMatch.species, topMatch.commonName || undefined);
+                    if (imageUrl) {
+                        embed.setThumbnail(imageUrl);
+                    }
                 }
             }
             catch (error) {
