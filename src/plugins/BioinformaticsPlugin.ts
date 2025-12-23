@@ -58,9 +58,11 @@ export class BioinformaticsPlugin implements BotPlugin {
 
     async initialize(client: Client, bot: ExtensibleBot): Promise<void> {
         client.on("messageCreate", (message) => {
-            this.scanMessage(message).catch(error => {
-                this.logger.error('Error in message scanning:', error);
-            });
+            if(Math.random() <= 0.1) {
+                this.scanMessage(message).catch(error => {
+                    this.logger.error('Error in message scanning:', error);
+                });
+            }
         });
 
         this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
