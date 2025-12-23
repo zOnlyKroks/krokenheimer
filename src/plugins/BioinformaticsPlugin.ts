@@ -115,7 +115,7 @@ export class BioinformaticsPlugin implements BotPlugin {
 
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const finalEmbed = await SequenceFormatter.createAnalysisEmbed(result);
+                    const finalEmbed = await SequenceFormatter.createSimpleAnalysisEmbed(result);
                     await notificationMsg.edit({ embeds: [finalEmbed] });
                 } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -140,7 +140,7 @@ export class BioinformaticsPlugin implements BotPlugin {
                 const processingMsg = await message.reply("🔄 Analyzing sequence with NCBI BLAST...");
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const embed = await SequenceFormatter.createAnalysisEmbed(result);
+                    const embed = await SequenceFormatter.createSimpleAnalysisEmbed(result);
                     await processingMsg.edit({ content: '', embeds: [embed] });
                 } catch (error) {
                     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

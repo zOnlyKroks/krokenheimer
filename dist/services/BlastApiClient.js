@@ -514,7 +514,7 @@ export class BlastApiClient {
             program: "blastn",
             database: "ena_sequence",
             sequence: fastaSeq,
-            email: "blast@example.com",
+            email: "finnrades@gmail.com",
             stype: "dna",
             task: seq.length < 50 ? "blastn-short" : "megablast",
             exp: "1000",

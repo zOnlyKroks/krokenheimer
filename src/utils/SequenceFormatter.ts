@@ -8,7 +8,75 @@ import {SpeciesImageService} from "../services/SpeciesImageService.js";
 export class SequenceFormatter {
 
   /**
-   * Create main analysis result embed
+   * Create simplified analysis result embed (default)
+   */
+  public static async createSimpleAnalysisEmbed(result: SpeciesIdentification): Promise<EmbedBuilder> {
+    const embed = new EmbedBuilder()
+      .setTitle("DNA Analysis")
+      .setColor(this.getConfidenceColor(result.confidence))
+      .setTimestamp();
+
+    // Show the scanned sequence
+    const sequencePreview = result.sequence.cleaned.length > 100
+      ? `${result.sequence.cleaned.substring(0, 100)}...`
+      : result.sequence.cleaned;
+
+    embed.addFields([
+      {
+        name: "Scanned Sequence:",
+        value: `\`\`\`${sequencePreview}\`\`\`\n`,
+        inline: false
+      }
+    ]);
+
+    // Top 4 matches with percentages and descriptions
+    if (result.topMatches.length > 0) {
+      const topMatches = result.topMatches.slice(0, 4);
+      const matchesText = topMatches.map((match, index) => {
+        const commonName = match.commonName ? ` (${match.commonName})` : '';
+        const description = match.description ? ` - ${match.description}` : '';
+        return `${index + 1}. **${match.species}**${commonName} - ${match.identity.toFixed(1)}%${description}`;
+      }).join('\n\n');
+
+      embed.addFields([
+        {
+          name: "Top Matches",
+          value: matchesText,
+          inline: false
+        }
+      ]);
+
+      // Add species image for top match
+      try {
+        const topMatch = result.topMatches[0];
+          const imageUrl = await SpeciesImageService.getSpeciesImage(
+              // @ts-ignore
+          topMatch.species,
+              // @ts-ignore
+          topMatch.commonName || undefined
+        );
+        if (imageUrl) {
+          embed.setThumbnail(imageUrl);
+        }
+      } catch (error) {
+        // Silently fail
+      }
+    } else {
+      embed.addFields([
+        {
+          name: "No Matches Found",
+          value: "No significant species matches were found for this sequence.",
+          inline: false
+        }
+      ]);
+    }
+
+    return embed;
+  }
+
+
+  /**
+   * Create main analysis result embed (verbose version)
    */
   public static async createAnalysisEmbed(result: SpeciesIdentification): Promise<EmbedBuilder> {
     const embed = new EmbedBuilder()

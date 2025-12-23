@@ -85,7 +85,7 @@ export class BioinformaticsPlugin {
                 const notificationMsg = await message.reply({ embeds: [detectionEmbed] });
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const finalEmbed = await SequenceFormatter.createAnalysisEmbed(result);
+                    const finalEmbed = await SequenceFormatter.createSimpleAnalysisEmbed(result);
                     await notificationMsg.edit({ embeds: [finalEmbed] });
                 }
                 catch (error) {
@@ -111,7 +111,7 @@ export class BioinformaticsPlugin {
                 const processingMsg = await message.reply("🔄 Analyzing sequence with NCBI BLAST...");
                 try {
                     result = await this.analyzeSequence(sequence, context);
-                    const embed = await SequenceFormatter.createAnalysisEmbed(result);
+                    const embed = await SequenceFormatter.createSimpleAnalysisEmbed(result);
                     await processingMsg.edit({ content: '', embeds: [embed] });
                 }
                 catch (error) {
