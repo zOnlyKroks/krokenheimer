@@ -39,6 +39,11 @@ export class BioinformaticsPlugin implements BotPlugin {
             name: "biostats",
             description: "Show analysis statistics (admin only)",
             execute: this.showStats.bind(this)
+        },
+        {
+            name: "alias",
+            description: "Manage character aliases for DNA sequence processing",
+            execute: this.manageAliases.bind(this)
         }
     ];
 
@@ -270,6 +275,229 @@ export class BioinformaticsPlugin implements BotPlugin {
                 }
             ])
             .setFooter({ text: `Generated at ${new Date().toLocaleString()}` });
+
+        await message.reply({ embeds: [embed] });
+    }
+
+    private async manageAliases(message: Message, args: string[]): Promise<void> {
+        if (args.length === 0) {
+            const helpEmbed = new EmbedBuilder()
+                .setTitle("🔧 Character Alias Management")
+                .setColor(0x0099ff)
+                .setDescription("Manage character aliases for DNA sequence processing")
+                .addFields([
+                    {
+                        name: "Commands",
+                        value: "```\n" +
+                            "!alias set <char> <replacement>  - Set character alias (ä → ae)\n" +
+                            "!alias remove <char>             - Remove character alias\n" +
+                            "!alias list                      - Show all current aliases\n" +
+                            "!alias reset                     - Reset to default aliases\n" +
+                            "```",
+                        inline: false
+                    },
+                    {
+                        name: "Examples",
+                        value: "```\n" +
+                            "!alias set ä ae      - Maps ä to ae\n" +
+                            "!alias set ø o       - Maps ø to o\n" +
+                            "!alias remove ä      - Removes ä mapping\n" +
+                            "```",
+                        inline: false
+                    }
+                ])
+                .setFooter({ text: "Character aliases help improve DNA sequence detection from text containing accented characters." });
+
+            await message.reply({ embeds: [helpEmbed] });
+            return;
+        }
+
+        if(!args[0]) throw Error("Args0 empty!")
+
+        const subcommand = args[0].toLowerCase();
+
+        switch (subcommand) {
+            case 'set':
+                await this.setAlias(message, args.slice(1));
+                break;
+            case 'remove':
+                await this.removeAlias(message, args.slice(1));
+                break;
+            case 'list':
+                await this.listAliases(message);
+                break;
+            case 'reset':
+                await this.resetAliases(message);
+                break;
+            default:
+                await message.reply(`❌ Unknown alias command: ${subcommand}\n\nUse \`!alias\` to see available commands.`);
+        }
+    }
+
+    private async setAlias(message: Message, args: string[]): Promise<void> {
+        if (args.length !== 2) {
+            await message.reply("❌ Usage: `!alias set <character> <replacement>`\n\nExample: `!alias set ä ae`");
+            return;
+        }
+
+        const [fromChar, toReplacement] = args;
+
+        if(!fromChar || !toReplacement) throw new Error("From or too chart empty!")
+
+        // Validate input
+        if (fromChar.length !== 1) {
+            await message.reply("❌ The character to replace must be exactly one character.");
+            return;
+        }
+
+        if (toReplacement.length > 5) {
+            await message.reply("❌ Replacement string cannot be longer than 5 characters.");
+            return;
+        }
+
+        // Prevent replacing standard DNA bases
+        if (['A', 'T', 'C', 'G', 'a', 't', 'c', 'g'].includes(fromChar)) {
+            await message.reply("❌ Cannot create aliases for standard DNA bases (A, T, C, G).");
+            return;
+        }
+
+        this.sequenceDetector.setCharacterAlias(fromChar, toReplacement);
+
+        const embed = new EmbedBuilder()
+            .setTitle("✅ Character Alias Set")
+            .setColor(0x00ff00)
+            .setDescription(`Character **${fromChar}** will now be replaced with **${toReplacement}** before DNA sequence processing.`)
+            .addFields([
+                {
+                    name: "Example",
+                    value: `Text containing "${fromChar}" → Processed as "${toReplacement}"`,
+                    inline: false
+                }
+            ])
+            .setTimestamp();
+
+        await message.reply({ embeds: [embed] });
+    }
+
+    private async removeAlias(message: Message, args: string[]): Promise<void> {
+        if (args.length !== 1) {
+            await message.reply("❌ Usage: `!alias remove <character>`\n\nExample: `!alias remove ä`");
+            return;
+        }
+
+        const charToRemove = args[0];
+
+        if(!charToRemove) throw new Error("Empty char!")
+
+        if (charToRemove.length !== 1) {
+            await message.reply("❌ Please specify exactly one character to remove.");
+            return;
+        }
+
+        const wasRemoved = this.sequenceDetector.removeCharacterAlias(charToRemove);
+
+        if (!wasRemoved) {
+            await message.reply(`❌ No alias found for character **${charToRemove}**.`);
+            return;
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle("✅ Character Alias Removed")
+            .setColor(0xff9900)
+            .setDescription(`Alias for character **${charToRemove}** has been removed.`)
+            .setTimestamp();
+
+        await message.reply({ embeds: [embed] });
+    }
+
+    private async listAliases(message: Message): Promise<void> {
+        const aliases = this.sequenceDetector.getCharacterAliases();
+
+        if (aliases.size === 0) {
+            await message.reply("📝 No character aliases are currently configured.");
+            return;
+        }
+
+        // Group aliases for better display
+        const aliasGroups = {
+            "German Umlauts": [] as string[],
+            "Accented Vowels": [] as string[],
+            "Other Characters": [] as string[],
+            "Custom": [] as string[]
+        };
+
+        const defaultAliases = new Set([
+            'ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü', 'à', 'á', 'â', 'ã', 'å', 'À', 'Á', 'Â', 'Ã', 'Å',
+            'è', 'é', 'ê', 'ë', 'È', 'É', 'Ê', 'Ë', 'ì', 'í', 'î', 'ï', 'Ì', 'Í', 'Î', 'Ï',
+            'ò', 'ó', 'ô', 'õ', 'Ò', 'Ó', 'Ô', 'Õ', 'ù', 'ú', 'û', 'Ù', 'Ú', 'Û',
+            'ç', 'Ç', 'ñ', 'Ñ', 'ß'
+        ]);
+
+        for (const [from, to] of aliases.entries()) {
+            const aliasStr = `${from} → ${to}`;
+
+            if (!defaultAliases.has(from)) {
+                aliasGroups["Custom"].push(aliasStr);
+            } else if (['ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü', 'ß'].includes(from)) {
+                aliasGroups["German Umlauts"].push(aliasStr);
+            } else if (/[àáâãåÀÁÂÃÅèéêëÈÉÊËìíîïÌÍÎÏòóôõÒÓÔÕùúûÙÚÛ]/.test(from)) {
+                aliasGroups["Accented Vowels"].push(aliasStr);
+            } else {
+                aliasGroups["Other Characters"].push(aliasStr);
+            }
+        }
+
+        const embed = new EmbedBuilder()
+            .setTitle("📝 Character Aliases")
+            .setColor(0x0099ff)
+            .setDescription(`${aliases.size} character alias${aliases.size === 1 ? '' : 'es'} configured`)
+            .setTimestamp();
+
+        for (const [groupName, groupAliases] of Object.entries(aliasGroups)) {
+            if (groupAliases.length > 0) {
+                // Split into chunks of 20 to avoid field value limits
+                const chunks = [];
+                for (let i = 0; i < groupAliases.length; i += 20) {
+                    chunks.push(groupAliases.slice(i, i + 20));
+                }
+
+                chunks.forEach((chunk, index) => {
+                    const name = chunks.length === 1 ? groupName : `${groupName} (${index + 1}/${chunks.length})`;
+                    embed.addFields([{
+                        name: name,
+                        value: "```\n" + chunk.join('\n') + "\n```",
+                        inline: true
+                    }]);
+                });
+            }
+        }
+
+        await message.reply({ embeds: [embed] });
+    }
+
+    private async resetAliases(message: Message): Promise<void> {
+        if (!message.member?.permissions.has('Administrator')) {
+            await message.reply("❌ This command requires administrator permissions.");
+            return;
+        }
+
+        this.sequenceDetector.resetCharacterAliases();
+
+        const embed = new EmbedBuilder()
+            .setTitle("🔄 Character Aliases Reset")
+            .setColor(0xff9900)
+            .setDescription("All character aliases have been reset to default values.")
+            .addFields([
+                {
+                    name: "Default Aliases Include",
+                    value: "• German umlauts (ä→ae, ö→oe, ü→ue)\n" +
+                           "• Accented vowels (á→a, é→e, í→i, etc.)\n" +
+                           "• Common special characters (ç→c, ñ→n, ß→ss)",
+                    inline: false
+                }
+            ])
+            .setFooter({ text: "Use !alias list to see all default aliases" })
+            .setTimestamp();
 
         await message.reply({ embeds: [embed] });
     }

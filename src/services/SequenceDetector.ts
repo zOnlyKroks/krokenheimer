@@ -11,6 +11,27 @@ export class SequenceDetector {
     requiredComplexity: 0.3
   };
 
+  private characterAliases: Map<string, string> = new Map([
+    // German umlauts
+    ['ä', 'ae'], ['ö', 'oe'], ['ü', 'ue'],
+    ['Ä', 'AE'], ['Ö', 'OE'], ['Ü', 'UE'],
+    // Accented vowels
+    ['à', 'a'], ['á', 'a'], ['â', 'a'], ['ã', 'a'], ['å', 'a'],
+    ['À', 'A'], ['Á', 'A'], ['Â', 'A'], ['Ã', 'A'], ['Å', 'A'],
+    ['è', 'e'], ['é', 'e'], ['ê', 'e'], ['ë', 'e'],
+    ['È', 'E'], ['É', 'E'], ['Ê', 'E'], ['Ë', 'E'],
+    ['ì', 'i'], ['í', 'i'], ['î', 'i'], ['ï', 'i'],
+    ['Ì', 'I'], ['Í', 'I'], ['Î', 'I'], ['Ï', 'I'],
+    ['ò', 'o'], ['ó', 'o'], ['ô', 'o'], ['õ', 'o'],
+    ['Ò', 'O'], ['Ó', 'O'], ['Ô', 'O'], ['Õ', 'O'],
+    ['ù', 'u'], ['ú', 'u'], ['û', 'u'],
+    ['Ù', 'U'], ['Ú', 'U'], ['Û', 'U'],
+    // Other common characters
+    ['ç', 'c'], ['Ç', 'C'],
+    ['ñ', 'n'], ['Ñ', 'N'],
+    ['ß', 'ss']
+  ]);
+
   /**
    * Main extraction method - finds DNA sequences using multiple approaches
    */
@@ -18,8 +39,11 @@ export class SequenceDetector {
     const opts = { ...this.defaultOptions, ...options };
     const startTime = Date.now();
 
+    // Apply character aliases before processing
+    const processedText = this.applyCharacterAliases(text);
+
     // Pre-filter: check if message has enough ATCG letters to be worth analyzing
-    const atcgCount = this.countATCGLetters(text);
+    const atcgCount = this.countATCGLetters(processedText);
     if (atcgCount < opts.minSequenceLength) {
       return {
         sequences: [],
@@ -35,7 +59,7 @@ export class SequenceDetector {
 
     // Method 1: Sequential extraction
     if (opts.extractionMethods.includes('sequential')) {
-      const sequential = this.extractSequentialATCG(text);
+      const sequential = this.extractSequentialATCG(processedText);
       if (sequential.length >= opts.minSequenceLength) {
         const seq = this.createDNASequence(sequential, text, 'sequential');
         if (this.isValidSequence(seq, opts).isValid) {
@@ -47,7 +71,7 @@ export class SequenceDetector {
 
     // Method 2: Word-based extraction
     if (opts.extractionMethods.includes('word-based')) {
-      const wordBased = this.extractWordBasedATCG(text);
+      const wordBased = this.extractWordBasedATCG(processedText);
       if (wordBased.length >= opts.minSequenceLength) {
         const seq = this.createDNASequence(wordBased, text, 'word-based');
         if (this.isValidSequence(seq, opts).isValid) {
@@ -59,7 +83,7 @@ export class SequenceDetector {
 
     // Method 3: Continuous sequence detection
     if (opts.extractionMethods.includes('continuous')) {
-      const continuous = this.extractContinuousSequences(text);
+      const continuous = this.extractContinuousSequences(processedText);
       continuous.forEach(seq => {
         if (seq.length >= opts.minSequenceLength) {
           const dnaSeq = this.createDNASequence(seq, text, 'continuous');
@@ -367,6 +391,20 @@ export class SequenceDetector {
   }
 
   /**
+   * Apply character aliases to text before processing
+   * Example: "ärgerlich täglich" → "aergerlich taeglich"
+   */
+  private applyCharacterAliases(text: string): string {
+    let processedText = text;
+
+    for (const [from, to] of this.characterAliases.entries()) {
+      processedText = processedText.replace(new RegExp(from, 'g'), to);
+    }
+
+    return processedText;
+  }
+
+  /**
    * Convert IUPAC nucleotide codes to standard ATCG
    */
   private convertIUPACToStandard(sequence: string): string {
@@ -385,6 +423,53 @@ export class SequenceDetector {
     };
 
     return sequence.replace(/[WSMKRYBDHVN]/g, match => iupacMap[match] || match);
+  }
+
+  /**
+   * Set a character alias
+   */
+  public setCharacterAlias(from: string, to: string): void {
+    this.characterAliases.set(from, to);
+  }
+
+  /**
+   * Remove a character alias
+   */
+  public removeCharacterAlias(from: string): boolean {
+    return this.characterAliases.delete(from);
+  }
+
+  /**
+   * Get all character aliases
+   */
+  public getCharacterAliases(): Map<string, string> {
+    return new Map(this.characterAliases);
+  }
+
+  /**
+   * Reset character aliases to defaults
+   */
+  public resetCharacterAliases(): void {
+    this.characterAliases = new Map([
+      // German umlauts
+      ['ä', 'ae'], ['ö', 'oe'], ['ü', 'ue'],
+      ['Ä', 'AE'], ['Ö', 'OE'], ['Ü', 'UE'],
+      // Accented vowels
+      ['à', 'a'], ['á', 'a'], ['â', 'a'], ['ã', 'a'], ['å', 'a'],
+      ['À', 'A'], ['Á', 'A'], ['Â', 'A'], ['Ã', 'A'], ['Å', 'A'],
+      ['è', 'e'], ['é', 'e'], ['ê', 'e'], ['ë', 'e'],
+      ['È', 'E'], ['É', 'E'], ['Ê', 'E'], ['Ë', 'E'],
+      ['ì', 'i'], ['í', 'i'], ['î', 'i'], ['ï', 'i'],
+      ['Ì', 'I'], ['Í', 'I'], ['Î', 'I'], ['Ï', 'I'],
+      ['ò', 'o'], ['ó', 'o'], ['ô', 'o'], ['õ', 'o'],
+      ['Ò', 'O'], ['Ó', 'O'], ['Ô', 'O'], ['Õ', 'O'],
+      ['ù', 'u'], ['ú', 'u'], ['û', 'u'],
+      ['Ù', 'U'], ['Ú', 'U'], ['Û', 'U'],
+      // Other common characters
+      ['ç', 'c'], ['Ç', 'C'],
+      ['ñ', 'n'], ['Ñ', 'N'],
+      ['ß', 'ss']
+    ]);
   }
 
   /**
