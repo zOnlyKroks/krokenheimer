@@ -6,6 +6,7 @@ Uses HuggingFace Transformers + PEFT (no Unsloth - that requires GPU)
 
 import json
 import sys
+import os
 import torch
 from transformers import (
     AutoModelForCausalLM,
@@ -55,7 +56,6 @@ def main():
     output_model_name = sys.argv[3]
 
     # Set nice priority to not kill the server
-    import os
     os.nice(19)  # Lowest CPU priority
 
     # Limit threads to prevent CPU overload
@@ -77,7 +77,6 @@ def main():
     print("   ✅ Tokenizer loaded")
 
     print("   📦 Loading model weights (this takes a few minutes on CPU)...")
-    import sys
     sys.stdout.flush()  # Force flush to see progress immediately
 
     model = AutoModelForCausalLM.from_pretrained(
