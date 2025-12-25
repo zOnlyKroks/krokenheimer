@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  krokenheimer:
+    build: .
+    container_name: krokenheimer-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Persist message database and ChromaDB data
+      - ./data:/app/data
+      - ./chroma_data:/app/chroma_data
+      # Persist Ollama models (so you don't re-download on container restart)
+      - ollama_models:/root/.ollama
+    environment:
+      # LLM Configuration (can override in .env)
+      - LLM_ENABLED=${LLM_ENABLED:-true}
+      - LLM_MIN_INTERVAL_MINUTES=${LLM_MIN_INTERVAL_MINUTES:-60}
+      - LLM_MAX_INTERVAL_MINUTES=${LLM_MAX_INTERVAL_MINUTES:-180}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2:3b}
+      - OLLAMA_TEMPERATURE=${OLLAMA_TEMPERATURE:-0.9}
+      - OLLAMA_MAX_TOKENS=${OLLAMA_MAX_TOKENS:-200}
+    # Optional: expose ports for debugging
+    # ports:
+    #   - "11434:11434"  # Ollama
+    #   - "8000:8000"    # ChromaDB
+
+volumes:
+  ollama_models:
+    driver: local

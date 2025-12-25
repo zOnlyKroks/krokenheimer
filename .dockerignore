@@ -1,0 +1,35 @@
+# Node
+node_modules/
+npm-debug.log*
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Data directories (mounted as volumes)
+data/
+chroma_data/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Scripts (not needed in container)
+start-llm-services.sh
+stop-llm-services.sh
+start-all.sh
+check-chroma.sh
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
