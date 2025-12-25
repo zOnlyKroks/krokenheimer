@@ -1,35 +1,42 @@
 # Node
 node_modules/
-npm-debug.log*
+npm-debug.log
 dist/
 
-# Environment
-.env
-.env.local
-.env.*.local
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
 
-# Data directories (mounted as volumes)
+# Data
 data/
 chroma_data/
+*.db
+*.db-journal
 
 # Git
 .git/
 .gitignore
 
-# Documentation
-*.md
-!README.md
-
-# Scripts (not needed in container)
-start-llm-services.sh
-stop-llm-services.sh
-start-all.sh
-check-chroma.sh
-
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Build artifacts
+*.gguf
+*.safetensors
+checkpoints/
+models/

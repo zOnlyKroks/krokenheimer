@@ -59,6 +59,39 @@ export class FineTuningService {
     };
   }
 
+  private async checkPythonEnvironment(): Promise<boolean> {
+    console.log('🔍 Checking Python environment...');
+
+    // Check if venv exists or python3 is available
+    const pythonCmd = await fs.access('./venv/bin/python3')
+      .then(() => './venv/bin/python3')
+      .catch(() => 'python3');
+
+    return new Promise((resolve) => {
+      const checkProcess = spawn(pythonCmd, ['-c', 'import unsloth; print("OK")']);
+
+      let output = '';
+      checkProcess.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+
+      checkProcess.on('close', (code) => {
+        if (code === 0 && output.includes('OK')) {
+          console.log('✅ Python environment ready');
+          resolve(true);
+        } else {
+          console.error('❌ Unsloth not installed');
+          resolve(false);
+        }
+      });
+
+      checkProcess.on('error', () => {
+        console.error('❌ Python not found');
+        resolve(false);
+      });
+    });
+  }
+
   async exportTrainingData(): Promise<string> {
     console.log('📝 Exporting training data...');
 
@@ -152,6 +185,15 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
     console.log('🚀 Starting fine-tuning process...');
 
     try {
+      // Check if Python environment is ready
+      const isReady = await this.checkPythonEnvironment();
+      if (!isReady) {
+        console.error('❌ Python environment not ready!');
+        console.error('   Run: ./scripts/setup_training.sh');
+        this.isTraining = false;
+        return;
+      }
+
       // Export training data
       const trainingDataPath = await this.exportTrainingData();
 
@@ -221,13 +263,20 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
         modelName
       ]);
 
+      let stdout = '';
+      let stderr = '';
+
       pythonProcess.stdout.on('data', (data) => {
-        console.log(`   ${data.toString().trim()}`);
+        const text = data.toString();
+        stdout += text;
+        console.log(`   ${text.trim()}`);
       });
 
       pythonProcess.stderr.on('data', (data) => {
-        // Python prints to stderr too, not always errors
-        console.log(`   ${data.toString().trim()}`);
+        const text = data.toString();
+        stderr += text;
+        // Python prints progress to stderr too
+        console.log(`   ${text.trim()}`);
       });
 
       pythonProcess.on('close', async (code) => {
@@ -239,8 +288,18 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
 
           resolve();
         } else {
-          reject(new Error(`Training failed with code ${code}`));
+          console.error('❌ Training script failed!');
+          console.error('--- STDOUT ---');
+          console.error(stdout);
+          console.error('--- STDERR ---');
+          console.error(stderr);
+          reject(new Error(`Training failed with code ${code}. Check logs above for details.`));
         }
+      });
+
+      pythonProcess.on('error', (error) => {
+        console.error('❌ Failed to spawn Python process:', error);
+        reject(new Error(`Failed to start training: ${error.message}`));
       });
     });
   }

@@ -32,6 +32,25 @@ RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import su
     echo 'exec /opt/chromadb-venv/bin/chroma run --host 0.0.0.0 --port 8000 --path "$1"' >> /usr/local/bin/run-chromadb && \
     chmod +x /usr/local/bin/run-chromadb
 
+# Install Unsloth training environment (separate venv)
+RUN python3 -m venv /opt/training-venv && \
+    /opt/training-venv/bin/pip install --upgrade pip && \
+    /opt/training-venv/bin/pip install --no-cache-dir \
+    torch \
+    transformers \
+    trl \
+    datasets \
+    accelerate \
+    peft \
+    bitsandbytes \
+    "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+
+# Verify Unsloth installation
+RUN /opt/training-venv/bin/python -c "import unsloth; print('Unsloth installed successfully')"
+
+# Symlink training venv to app directory for bot access
+RUN ln -s /opt/training-venv /app/venv
+
 WORKDIR /app
 
 COPY package*.json ./
@@ -41,7 +60,10 @@ COPY . .
 RUN npm run build
 RUN npm prune --production
 
-RUN mkdir -p /app/data /app/chroma_data /var/log/supervisor
+RUN mkdir -p /app/data /app/chroma_data /app/data/models /app/data/checkpoints /var/log/supervisor
+
+# Make training scripts executable
+RUN chmod +x /app/scripts/*.py /app/scripts/*.sh || true
 
 COPY wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh
 RUN chmod +x /usr/local/bin/wait-for-chromadb.sh
