@@ -7,16 +7,13 @@ Run the Krokenheimer Discord bot with full LLM features in a Docker container.
 ```bash
 # 1. Configure environment
 cp .env.example .env
-# Edit .env and add your BOT_TOKEN
+nano .env  # Add your BOT_TOKEN
 
 # 2. Build and start
-docker-compose up -d
+./docker-run.sh
 
-# 3. View logs
-docker-compose logs -f
-
-# 4. Check status
-docker-compose ps
+# 3. View logs (Ctrl+C to exit, container keeps running)
+docker logs -f krokenheimer-bot
 ```
 
 That's it! The container will automatically:
@@ -38,7 +35,7 @@ All services are managed by `supervisord` and start automatically.
 
 ### Environment Variables
 
-Edit `.env` or set in `docker-compose.yml`:
+Edit `.env` file:
 
 ```env
 # Required
@@ -67,68 +64,66 @@ This means your bot's learned data survives container restarts.
 ### Basic Operations
 
 ```bash
-# Start (detached)
-docker-compose up -d
+# Start
+./docker-run.sh
 
 # Stop
-docker-compose down
+./docker-stop.sh
 
 # Restart
-docker-compose restart
+./docker-restart.sh
 
-# View logs (all services)
-docker-compose logs -f
-
-# View logs (bot only)
-docker-compose logs -f krokenheimer
+# View logs
+docker logs -f krokenheimer-bot
 
 # Check status
-docker-compose ps
+docker ps | grep krokenheimer-bot
 ```
 
 ### Build and Rebuild
 
 ```bash
-# Build image
-docker-compose build
+# Rebuild from scratch
+docker build --no-cache -t krokenheimer-bot .
+./docker-restart.sh
 
-# Rebuild from scratch (no cache)
-docker-compose build --no-cache
-
-# Pull latest base images and rebuild
-docker-compose build --pull
+# Or use the restart script (rebuilds automatically)
+./docker-restart.sh
 ```
 
 ### Maintenance
 
 ```bash
 # Execute command in running container
-docker-compose exec krokenheimer bash
+docker exec -it krokenheimer-bot bash
 
 # Check Ollama status inside container
-docker-compose exec krokenheimer ollama list
+docker exec krokenheimer-bot ollama list
 
 # Check ChromaDB inside container
-docker-compose exec krokenheimer curl http://localhost:8000/api/v1/heartbeat
+docker exec krokenheimer-bot curl http://localhost:8000/api/v1/heartbeat
 
 # View supervisor status
-docker-compose exec krokenheimer supervisorctl status
+docker exec krokenheimer-bot supervisorctl status
+
+# Pull a model manually
+docker exec krokenheimer-bot ollama pull llama3.2:3b
 ```
 
 ### Data Management
 
 ```bash
 # Clear learned data (stop first)
-docker-compose down
+./docker-stop.sh
 rm -rf ./data ./chroma_data
-docker-compose up -d
+./docker-run.sh
 
 # Backup data
-tar -czf backup.tar.gz data/ chroma_data/
+tar -czf backup-$(date +%Y%m%d).tar.gz data/ chroma_data/
 
 # Restore data
-tar -xzf backup.tar.gz
-docker-compose restart
+tar -xzf backup-20231225.tar.gz
+docker restart krokenheimer-bot
 ```
 
 ## Troubleshooting
@@ -137,10 +132,10 @@ docker-compose restart
 
 ```bash
 # View all service logs
-docker-compose logs -f
+docker logs -f krokenheimer-bot
 
 # Check individual services via supervisor
-docker-compose exec krokenheimer supervisorctl status
+docker exec krokenheimer-bot supervisorctl status
 ```
 
 Expected output:
@@ -154,32 +149,32 @@ ollama                           RUNNING   pid 789, uptime 0:05:25
 
 ```bash
 # Inside container
-docker-compose exec krokenheimer supervisorctl restart discord-bot
-docker-compose exec krokenheimer supervisorctl restart ollama
-docker-compose exec krokenheimer supervisorctl restart chromadb
+docker exec krokenheimer-bot supervisorctl restart discord-bot
+docker exec krokenheimer-bot supervisorctl restart ollama
+docker exec krokenheimer-bot supervisorctl restart chromadb
 ```
 
 ### View Service Logs
 
 ```bash
 # All services
-docker-compose logs -f
+docker logs -f krokenheimer-bot
 
 # Ollama only
-docker-compose exec krokenheimer supervisorctl tail -f ollama
+docker exec krokenheimer-bot supervisorctl tail -f ollama
 
 # ChromaDB only
-docker-compose exec krokenheimer supervisorctl tail -f chromadb
+docker exec krokenheimer-bot supervisorctl tail -f chromadb
 
 # Bot only
-docker-compose exec krokenheimer supervisorctl tail -f discord-bot
+docker exec krokenheimer-bot supervisorctl tail -f discord-bot
 ```
 
 ### Common Issues
 
 **Bot won't start:**
-- Check BOT_TOKEN is set: `docker-compose exec krokenheimer env | grep BOT_TOKEN`
-- View bot logs: `docker-compose logs krokenheimer`
+- Check BOT_TOKEN is set: `docker exec krokenheimer-bot env | grep BOT_TOKEN`
+- View bot logs: `docker logs krokenheimer-bot`
 
 **Out of memory:**
 - Reduce model size in `.env`: `OLLAMA_MODEL=llama3.2:3b`
@@ -187,12 +182,12 @@ docker-compose exec krokenheimer supervisorctl tail -f discord-bot
 
 **Model download failed:**
 - Check internet connection
-- Restart container: `docker-compose restart`
-- Manually pull model: `docker-compose exec krokenheimer ollama pull llama3.2:3b`
+- Restart container: `docker restart krokenheimer-bot`
+- Manually pull model: `docker exec krokenheimer-bot ollama pull llama3.2:3b`
 
 **Services not starting:**
-- Check supervisor status: `docker-compose exec krokenheimer supervisorctl status`
-- View supervisor logs: `docker-compose logs krokenheimer | grep supervisor`
+- Check supervisor status: `docker exec krokenheimer-bot supervisorctl status`
+- View supervisor logs: `docker logs krokenheimer-bot | grep supervisor`
 
 ## Resource Requirements
 

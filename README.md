@@ -28,13 +28,15 @@ An extensible Discord bot with plugin architecture featuring automated LLM-power
 ```bash
 # 1. Configure environment
 cp .env.example .env
-# Edit .env and add your BOT_TOKEN
+nano .env  # Add your BOT_TOKEN
 
-# 2. Start everything
-docker-compose up -d
+# 2. Build and run
+./docker-run.sh
 
-# 3. View logs
-docker-compose logs -f
+# 3. Management commands
+docker logs -f krokenheimer-bot  # View logs
+docker restart krokenheimer-bot  # Restart
+./docker-stop.sh                 # Stop
 ```
 
 See [DOCKER.md](DOCKER.md) for detailed Docker instructions.
