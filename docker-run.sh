@@ -3,7 +3,9 @@
 # Load environment variables from .env file
 if [ -f .env ]; then
     echo "📋 Loading environment from .env file..."
-    export $(cat .env | grep -v '^#' | xargs)
+    set -a
+    source .env
+    set +a
 else
     echo "❌ .env file not found!"
     exit 1
@@ -15,7 +17,7 @@ if [ -z "$BOT_TOKEN" ]; then
     exit 1
 fi
 
-echo "✅ BOT_TOKEN is set"
+echo "✅ BOT_TOKEN is set (length: ${#BOT_TOKEN})"
 echo "✅ BOT_OWNERS: ${BOT_OWNERS:-(none)}"
 
 # Build the image
