@@ -4,6 +4,7 @@ import type { ExtensibleBot } from '../core/Bot.js';
 import messageStorageService from '../services/MessageStorageService.js';
 import vectorStoreService from '../services/VectorStoreService.js';
 import ollamaService from '../services/OllamaService.js';
+import fineTuningService from '../services/FineTuningService.js';
 import cron from 'node-cron';
 import { MessageGenerationConfig } from '../types/llm.js';
 
@@ -34,6 +35,12 @@ export class LLMPlugin implements BotPlugin {
       description: 'Configure or trigger message scanning',
       usage: 'llmscan [interval_minutes|now]',
       execute: this.configureScan.bind(this),
+    },
+    {
+      name: 'llmtrain',
+      description: 'Manage model training',
+      usage: 'llmtrain [now|status]',
+      execute: this.manageTrain.bind(this),
     }
   ];
 
@@ -171,6 +178,18 @@ export class LLMPlugin implements BotPlugin {
         console.error('Failed to store message in vector store:', err);
       });
 
+      // Increment training counter
+      fineTuningService.incrementMessageCount();
+
+      // Check if we should trigger training
+      if (fineTuningService.shouldTrain()) {
+        console.log('🎯 Training threshold reached! Starting background training...');
+        // Start training in background (non-blocking)
+        fineTuningService.startTraining().catch(err => {
+          console.error('Background training failed:', err);
+        });
+      }
+
     } catch (error) {
       console.error('Failed to collect message:', error);
     }
@@ -281,17 +300,17 @@ export class LLMPlugin implements BotPlugin {
     }
 
     try {
-      // Get recent messages for context
-      const recentMessages = messageStorageService.getRecentMessages(channelId, 50);
+      // Get recent messages for context (increased to 100 for better context)
+      const recentMessages = messageStorageService.getRecentMessages(channelId, 100);
 
       if (recentMessages.length < 10) {
         console.log(`📝 Not enough messages in #${channelName} to generate (need at least 10)`);
         return;
       }
 
-      // Generate message using LLM
-      console.log(`🤖 Generating message for #${channelName}...`);
-      const generatedContent = await ollamaService.generateMessage(recentMessages, channelName);
+      // Generate message using LLM with RAG (passes channelId for vector search)
+      console.log(`🤖 Generating message for #${channelName} (using RAG)...`);
+      const generatedContent = await ollamaService.generateMessage(recentMessages, channelName, channelId);
 
       // Get the channel and send message
       const channel = await this.client.channels.fetch(channelId);
@@ -491,6 +510,7 @@ export class LLMPlugin implements BotPlugin {
       const vectorCount = await vectorStoreService.getCollectionCount();
       const activeChannels = messageStorageService.getActiveChannels();
       const llmConfig = ollamaService.getConfig();
+      const trainingStatus = fineTuningService.getTrainingStatus();
 
       // Get current German time
       const germanTime = new Date().toLocaleString('en-US', { timeZone: 'Europe/Berlin' });
@@ -515,9 +535,10 @@ export class LLMPlugin implements BotPlugin {
 ${channelList}
 
 **LLM Configuration:**
-• Model: ${llmConfig.model}
+• Model: ${fineTuningService.getCurrentModelName()}
 • Temperature: ${llmConfig.temperature}
 • Max tokens: ${llmConfig.maxTokens}
+• Context window: ${llmConfig.contextWindow}
 
 **Auto-generation:**
 • Status: ${this.config.enabled ? '✅ Enabled' : '❌ Disabled'}
@@ -531,12 +552,69 @@ ${channelList}
 • Scan interval: ${this.scanIntervalMinutes} minutes
 • Last scan: ${this.lastScanTime > 0 ? `${Math.round((Date.now() - this.lastScanTime) / 60000)} minutes ago` : 'Never'}
 • Status: ${this.isScanning ? '🔄 Scan in progress...' : '✅ Idle'}
+
+**Training Status:**
+• Training: ${trainingStatus.isTraining ? '🔄 In progress...' : '✅ Idle'}
+• Messages since last train: ${trainingStatus.messagesSinceLastTrain}/${trainingStatus.threshold}
+• Progress: ${Math.round((trainingStatus.messagesSinceLastTrain / trainingStatus.threshold) * 100)}%
       `;
 
       await message.reply(statsText);
     } catch (error) {
       console.error('Failed to show stats:', error);
       await message.reply('❌ Failed to retrieve statistics');
+    }
+  }
+
+  private async manageTrain(message: Message, args: string[]): Promise<void> {
+    if (args.length === 0 || args[0] === 'status') {
+      // Show training status
+      const status = fineTuningService.getTrainingStatus();
+      const totalMessages = messageStorageService.getTotalMessageCount();
+
+      const statusText = `
+**🎓 Training Status**
+
+• Current model: ${fineTuningService.getCurrentModelName()}
+• Total messages: ${totalMessages}
+• Messages since last train: ${status.messagesSinceLastTrain}/${status.threshold}
+• Progress to next train: ${Math.round((status.messagesSinceLastTrain / status.threshold) * 100)}%
+• Training status: ${status.isTraining ? '🔄 In progress...' : '✅ Idle'}
+
+**Usage:**
+\`!llmtrain now\` - Start training immediately
+\`!llmtrain status\` - Show this status
+      `;
+
+      await message.reply(statusText);
+      return;
+    }
+
+    const command = args[0].toLowerCase();
+
+    if (command === 'now') {
+      const status = fineTuningService.getTrainingStatus();
+
+      if (status.isTraining) {
+        await message.reply('⚠️  Training is already in progress!');
+        return;
+      }
+
+      const totalMessages = messageStorageService.getTotalMessageCount();
+      if (totalMessages < 500) {
+        await message.reply(`⚠️  Not enough messages for training. Have ${totalMessages}, need at least 500.`);
+        return;
+      }
+
+      await message.reply(`🚀 Starting training with ${totalMessages} messages...\n⏳ This will take 3-7 days on CPU. Bot will continue working normally.`);
+
+      // Start training in background
+      fineTuningService.startTraining().catch(err => {
+        console.error('Training failed:', err);
+        message.reply('❌ Training failed. Check console for details.').catch(() => {});
+      });
+    } else {
+      await message.reply('❌ Unknown command. Use `!llmtrain now` or `!llmtrain status`');
     }
   }
 

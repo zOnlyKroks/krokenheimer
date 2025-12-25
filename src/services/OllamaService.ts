@@ -53,10 +53,25 @@ export class OllamaService {
     }
   }
 
-  async generateMessage(context: StoredMessage[], channelName: string): Promise<string> {
+  async generateMessage(context: StoredMessage[], channelName: string, channelId?: string): Promise<string> {
     try {
-      // Build context from recent messages
-      const contextText = this.buildContextPrompt(context, channelName);
+      // Get relevant historical messages using vector search ACROSS ALL CHANNELS
+      let historicalContext: StoredMessage[] = [];
+      if (context.length > 0) {
+        const vectorStoreService = (await import('./VectorStoreService.js')).default;
+
+        // Use recent messages to create a search query
+        const recentTopics = context.slice(-5).map(m => m.content).join(' ');
+        // Search ALL channels (no channelId filter) - bot knows everything
+        historicalContext = await vectorStoreService.findSimilarMessages(recentTopics, undefined, 20);
+
+        // Remove duplicates that are already in recent context
+        const recentIds = new Set(context.map(m => m.id));
+        historicalContext = historicalContext.filter(m => !recentIds.has(m.id));
+      }
+
+      // Build context from historical + recent messages
+      const contextText = this.buildContextPrompt(context, channelName, historicalContext);
 
       const response = await this.ollama.generate({
         model: this.config.model,
@@ -103,8 +118,24 @@ export class OllamaService {
 
   async generateMentionResponse(context: StoredMessage[], mentionContent: string, mentionAuthor: string): Promise<string> {
     try {
+      // Get relevant historical messages using vector search ACROSS ALL CHANNELS
+      let historicalContext: StoredMessage[] = [];
+      if (context.length > 0) {
+        const vectorStoreService = (await import('./VectorStoreService.js')).default;
+
+        // Search based on the mention content
+        const cleanedContent = mentionContent.replace(/<@!?\d+>/g, '').trim();
+        if (cleanedContent) {
+          historicalContext = await vectorStoreService.findSimilarMessages(cleanedContent, undefined, 20);
+
+          // Remove duplicates
+          const recentIds = new Set(context.map(m => m.id));
+          historicalContext = historicalContext.filter(m => !recentIds.has(m.id));
+        }
+      }
+
       // Build context for mention response
-      const contextText = this.buildMentionPrompt(context, mentionContent, mentionAuthor);
+      const contextText = this.buildMentionPrompt(context, mentionContent, mentionAuthor, historicalContext);
 
       const response = await this.ollama.generate({
         model: this.config.model,
@@ -159,41 +190,61 @@ export class OllamaService {
     }
   }
 
-  private buildContextPrompt(messages: StoredMessage[], channelName: string): string {
-    // Format recent messages
-    const messageHistory = messages
-      .slice(-20) // Last 20 messages
+  private buildContextPrompt(messages: StoredMessage[], channelName: string, historicalContext?: StoredMessage[]): string {
+    // Format recent messages (increased from 20 to 50)
+    const recentHistory = messages
+      .slice(-50)
       .map(m => `${m.authorName}: ${m.content}`)
       .join('\n');
 
-    return `You are participating in a Discord server chat in the #${channelName} channel. Generate a single, natural message that fits the conversation style and context. The message should be casual, authentic, and match the tone of recent messages.
+    // Format historical context if available (includes ALL channels)
+    let historicalSection = '';
+    if (historicalContext && historicalContext.length > 0) {
+      const historicalMessages = historicalContext
+        .map(m => `[#${m.channelName}] ${m.authorName}: ${m.content}`)
+        .join('\n');
 
-Recent conversation:
-${messageHistory}
+      historicalSection = `\n\nRelevant past conversations from across the entire server:\n${historicalMessages}\n`;
+    }
 
-Generate a single, short message (1-2 sentences) that would naturally continue this conversation. Do not include any labels, prefixes, or explanations. Just write the message itself.
+    return `You are a member of this Discord server who knows EVERYTHING that has been said in ALL channels. You have perfect memory of every conversation. You're now writing in #${channelName}. Generate a single, natural message that fits the current conversation. Be casual, authentic, and match the tone and patterns you've learned from the entire server.
+${historicalSection}
+Current conversation in #${channelName}:
+${recentHistory}
+
+Generate a single, short message (1-2 sentences) that would naturally continue this conversation based on everything you know from the entire server. Do not include any labels, prefixes, or explanations. Just write the message itself.
 
 Message:`;
   }
 
-  private buildMentionPrompt(messages: StoredMessage[], mentionContent: string, mentionAuthor: string): string {
+  private buildMentionPrompt(messages: StoredMessage[], mentionContent: string, mentionAuthor: string, historicalContext?: StoredMessage[]): string {
     // Format recent messages for context
     const messageHistory = messages
-      .slice(-15) // Last 15 messages
+      .slice(-30) // Last 30 messages
       .map(m => `${m.authorName}: ${m.content}`)
       .join('\n');
+
+    // Format historical context if available (includes ALL channels)
+    let historicalSection = '';
+    if (historicalContext && historicalContext.length > 0) {
+      const historicalMessages = historicalContext
+        .map(m => `[#${m.channelName}] ${m.authorName}: ${m.content}`)
+        .join('\n');
+
+      historicalSection = `\n\nRelevant past conversations from across the entire server:\n${historicalMessages}\n`;
+    }
 
     // Remove the bot mention from the content to get the actual question/message
     const cleanedContent = mentionContent.replace(/<@!?\d+>/g, '').trim();
 
-    return `You are a helpful and friendly bot participating in a Discord server. ${mentionAuthor} just mentioned you with the following message:
+    return `You are a member of this Discord server who knows EVERYTHING that has been said in ALL channels. You have perfect memory of every conversation. ${mentionAuthor} just mentioned you with the following message:
 
 "${cleanedContent}"
-
+${historicalSection}
 Recent conversation context:
 ${messageHistory}
 
-Respond directly to ${mentionAuthor}'s message in a natural, conversational way. Be helpful, friendly, and concise. Match the tone of the conversation. If they're asking a question, try to answer it. If they're just saying hi or making a comment, respond appropriately.
+Respond directly to ${mentionAuthor}'s message in a natural, conversational way. Be helpful, friendly, and concise. Match the tone of the server. Use your knowledge from all channels if relevant. If they're asking a question, answer based on everything you know. If they're just saying hi or making a comment, respond appropriately.
 
 Do not include any labels, prefixes, or explanations. Just write your response directly.
 

@@ -1,5 +1,5 @@
-import { ChromaClient, Collection } from 'chromadb';
-import { StoredMessage } from '../types/llm.js';
+import {ChromaClient, Collection} from 'chromadb';
+import {StoredMessage} from '../types/llm.js';
 import ollamaService from './OllamaService.js';
 
 export class VectorStoreService {
@@ -107,8 +107,7 @@ export class VectorStoreService {
     }
 
     try {
-      const count = await this.collection.count();
-      return count;
+        return await this.collection.count();
     } catch (error) {
       console.error('Failed to get collection count:', error);
       return 0;
