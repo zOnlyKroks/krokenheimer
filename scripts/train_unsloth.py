@@ -61,14 +61,24 @@ def main():
 
     # Load model and tokenizer
     print("\n📥 Loading base model...")
+    print("   This will download ~2GB on first run (5-15 minutes)")
+    print("   Loading model into RAM...")
+
     tokenizer = AutoTokenizer.from_pretrained(base_model)
     tokenizer.pad_token = tokenizer.eos_token
+    print("   ✅ Tokenizer loaded")
+
+    print("   📦 Loading model weights (this takes a few minutes on CPU)...")
+    import sys
+    sys.stdout.flush()  # Force flush to see progress immediately
 
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=torch.float32,  # CPU needs float32
+        dtype=torch.float32,  # CPU needs float32 (was torch_dtype, now deprecated)
         low_cpu_mem_usage=True
     )
+    print("   ✅ Model loaded into memory")
+    sys.stdout.flush()
 
     # Add LoRA adapters
     print("🔧 Adding LoRA adapters...")
