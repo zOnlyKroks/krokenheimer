@@ -194,7 +194,7 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
   }
 
   private async trainWithUnsloth(baseModel: string, trainingDataPath: string): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const modelName = `${this.modelBaseName}-v${this.modelVersion + 1}`;
 
       console.log(`🔥 Training ${modelName} with Unsloth LoRA...`);
