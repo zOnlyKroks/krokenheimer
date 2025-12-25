@@ -88,6 +88,11 @@ export class LLMPlugin implements BotPlugin {
 
     // Set up message collection listener
     client.on('messageCreate', async (message) => {
+      // Handle mentions first (before collecting)
+      if (message.mentions.has(client.user!.id) && !message.author.bot) {
+        await this.handleMention(message);
+      }
+
       await this.collectMessage(message);
     });
 
@@ -101,6 +106,32 @@ export class LLMPlugin implements BotPlugin {
 
     // Start scheduled channel scanning
     this.startChannelScanning();
+  }
+
+  private async handleMention(message: Message): Promise<void> {
+    try {
+      console.log(`🔔 Bot mentioned by ${message.author.username} in #${message.channel.isDMBased() ? 'DM' : (message.channel as TextChannel).name}`);
+
+      // Get recent messages for context
+      const channelId = message.channel.id;
+      const recentMessages = messageStorageService.getRecentMessages(channelId, 30);
+
+      // If not enough context, use a simple response
+      if (recentMessages.length < 5) {
+        await message.reply('Hey! I need to learn more from this channel before I can have a proper conversation. Give me some time to collect messages!');
+        return;
+      }
+
+      // Generate a response using the LLM
+      const response = await ollamaService.generateMentionResponse(recentMessages, message.content, message.author.username);
+
+      await message.reply(response);
+      console.log(`✅ Replied to mention from ${message.author.username}`);
+
+    } catch (error) {
+      console.error('Failed to handle mention:', error);
+      await message.reply('Sorry, I encountered an error trying to respond. Please try again later!').catch(() => {});
+    }
   }
 
   private async collectMessage(message: Message): Promise<void> {

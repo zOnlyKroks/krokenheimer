@@ -101,6 +101,50 @@ export class OllamaService {
     }
   }
 
+  async generateMentionResponse(context: StoredMessage[], mentionContent: string, mentionAuthor: string): Promise<string> {
+    try {
+      // Build context for mention response
+      const contextText = this.buildMentionPrompt(context, mentionContent, mentionAuthor);
+
+      const response = await this.ollama.generate({
+        model: this.config.model,
+        prompt: contextText,
+        options: {
+          temperature: this.config.temperature,
+          num_predict: this.config.maxTokens,
+        }
+      });
+
+      // Clean up the response
+      let generatedText = response.response.trim();
+
+      // Remove any markdown formatting or code blocks
+      generatedText = generatedText.replace(/```[\s\S]*?```/g, '');
+      generatedText = generatedText.replace(/`[^`]+`/g, '');
+
+      // Remove common AI prefixes
+      generatedText = generatedText.replace(/^(Here's a response|Here is a response|Response:|Reply:)\s*/i, '');
+
+      // Limit length to reasonable Discord message size
+      if (generatedText.length > 500) {
+        generatedText = generatedText.substring(0, 500).trim();
+        // Try to end at a sentence
+        const lastPeriod = generatedText.lastIndexOf('.');
+        const lastQuestion = generatedText.lastIndexOf('?');
+        const lastExclamation = generatedText.lastIndexOf('!');
+        const lastSentence = Math.max(lastPeriod, lastQuestion, lastExclamation);
+        if (lastSentence > 100) {
+          generatedText = generatedText.substring(0, lastSentence + 1);
+        }
+      }
+
+      return generatedText;
+    } catch (error) {
+      console.error('Failed to generate mention response:', error);
+      throw error;
+    }
+  }
+
   async generateEmbedding(text: string): Promise<number[]> {
     try {
       const response = await this.ollama.embeddings({
@@ -130,6 +174,30 @@ ${messageHistory}
 Generate a single, short message (1-2 sentences) that would naturally continue this conversation. Do not include any labels, prefixes, or explanations. Just write the message itself.
 
 Message:`;
+  }
+
+  private buildMentionPrompt(messages: StoredMessage[], mentionContent: string, mentionAuthor: string): string {
+    // Format recent messages for context
+    const messageHistory = messages
+      .slice(-15) // Last 15 messages
+      .map(m => `${m.authorName}: ${m.content}`)
+      .join('\n');
+
+    // Remove the bot mention from the content to get the actual question/message
+    const cleanedContent = mentionContent.replace(/<@!?\d+>/g, '').trim();
+
+    return `You are a helpful and friendly bot participating in a Discord server. ${mentionAuthor} just mentioned you with the following message:
+
+"${cleanedContent}"
+
+Recent conversation context:
+${messageHistory}
+
+Respond directly to ${mentionAuthor}'s message in a natural, conversational way. Be helpful, friendly, and concise. Match the tone of the conversation. If they're asking a question, try to answer it. If they're just saying hi or making a comment, respond appropriately.
+
+Do not include any labels, prefixes, or explanations. Just write your response directly.
+
+Response:`;
   }
 
   getConfig(): LLMConfig {
