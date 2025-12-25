@@ -253,16 +253,20 @@ export class LLMPlugin implements BotPlugin {
 
   private async scanAllChannels(): Promise<void> {
     if (!this.client || !this.isInitialized) {
+      console.log('⚠️  Cannot scan: client not initialized');
       return;
     }
 
     try {
       const guilds = this.client.guilds.cache;
+      console.log(`📊 Found ${guilds.size} guild(s) to scan`);
+
       let totalScanned = 0;
       let totalCollected = 0;
 
       for (const [, guild] of guilds) {
         const channels = guild.channels.cache.filter(ch => ch.isTextBased());
+        console.log(`📁 Guild "${guild.name}": ${channels.size} text channels`);
 
         for (const [, channel] of channels) {
           if (!channel.isTextBased()) continue;
@@ -284,26 +288,34 @@ export class LLMPlugin implements BotPlugin {
             const textChannel = channel as TextChannel;
 
             // Fetch last 50 messages
+            console.log(`  📝 Scanning #${textChannel.name}...`);
             const messages = await textChannel.messages.fetch({ limit: 50 });
+            console.log(`     Fetched ${messages.size} messages`);
 
+            let channelCollected = 0;
             for (const [, msg] of messages) {
-              // Skip if already stored (check by timestamp - only collect recent messages)
-              const oneHourAgo = Date.now() - (60 * 60 * 1000);
-              if (msg.createdTimestamp < oneHourAgo) {
+              // Skip if already stored (check by timestamp - only collect recent messages from last 24 hours)
+              const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+              if (msg.createdTimestamp < oneDayAgo) {
                 continue;
               }
 
               if (!msg.author.bot && msg.content && msg.content.trim() !== '' && !msg.content.startsWith('!')) {
                 await this.collectMessage(msg);
                 totalCollected++;
+                channelCollected++;
               }
+            }
+
+            if (channelCollected > 0) {
+              console.log(`     ✅ Collected ${channelCollected} messages from #${textChannel.name}`);
             }
 
             // Small delay to avoid rate limits
             await new Promise(resolve => setTimeout(resolve, 100));
 
           } catch (error) {
-            console.error(`Failed to scan channel ${channel.id}:`, error);
+            console.error(`     ❌ Failed to scan channel #${(channel as TextChannel).name}:`, error);
           }
         }
       }
