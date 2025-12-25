@@ -307,17 +307,17 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
   }
 
   private ollamaToHuggingFace(ollamaModel: string): string {
-    // Map common Ollama models to standard HuggingFace models
+    // Map to OPEN models (no authentication required)
     const modelMap: Record<string, string> = {
-      'llama3.2:3b': 'meta-llama/Llama-3.2-3B-Instruct',
-      'llama3.2:1b': 'meta-llama/Llama-3.2-1B-Instruct',
-      'llama3.1:8b': 'meta-llama/Meta-Llama-3.1-8B-Instruct',
-      'llama3:8b': 'meta-llama/Meta-Llama-3-8B-Instruct',
-      'mistral:7b': 'mistralai/Mistral-7B-Instruct-v0.3',
+      'llama3.2:3b': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',  // Open alternative
+      'llama3.2:1b': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
+      'llama3.1:8b': 'mistralai/Mistral-7B-Instruct-v0.2',  // Open
+      'llama3:8b': 'mistralai/Mistral-7B-Instruct-v0.2',
+      'mistral:7b': 'mistralai/Mistral-7B-Instruct-v0.2',
     };
 
     // @ts-ignore
-    return modelMap[ollamaModel] || modelMap['llama3.2:3b'];
+    return modelMap[ollamaModel] || 'TinyLlama/TinyLlama-1.1B-Chat-v1.0';  // Default to TinyLlama (1.1B, fully open)
   }
 
   private async importGGUFToOllama(modelName: string): Promise<void> {
