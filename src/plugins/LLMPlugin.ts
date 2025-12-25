@@ -334,7 +334,7 @@ export class LLMPlugin implements BotPlugin {
 
               // Small delay between batches to avoid rate limiting
               await new Promise(resolve => setTimeout(resolve, 500));
-              console.log(`     More to go!`)
+              console.log(`     More to go, current: ${totalFetched}`)
             }
 
             console.log(`     Fetched ${totalFetched} total messages (${channelCollected} new, rest were duplicates or filtered)`);
