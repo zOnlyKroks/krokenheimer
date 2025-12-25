@@ -294,23 +294,54 @@ export class LLMPlugin implements BotPlugin {
             const textChannel = channel as TextChannel;
 
             console.log(`  📝 Scanning #${textChannel.name}...`);
-            const messages = await textChannel.messages.fetch();
-            console.log(`     Fetched ${messages.size} messages`);
 
+            // Fetch ALL messages using pagination
+            let lastMessageId: string | undefined;
+            let totalFetched = 0;
             let channelCollected = 0;
-            for (const [, msg] of messages) {
-              if (!msg.author.bot && msg.content && msg.content.trim() !== '' && !msg.content.startsWith('!')) {
-                await this.collectMessage(msg);
-                totalCollected++;
-                channelCollected++;
+            let hasMore = true;
+
+            while (hasMore) {
+              const options: { limit: number; before?: string } = { limit: 100 };
+              if (lastMessageId) {
+                options.before = lastMessageId;
               }
+
+              const messages = await textChannel.messages.fetch(options);
+              totalFetched += messages.size;
+
+              if (messages.size === 0) {
+                hasMore = false;
+                break;
+              }
+
+              // Process messages in this batch
+              for (const [, msg] of messages) {
+                if (!msg.author.bot && msg.content && msg.content.trim() !== '' && !msg.content.startsWith('!')) {
+                  await this.collectMessage(msg);
+                  totalCollected++;
+                  channelCollected++;
+                }
+              }
+
+              // Get the last message ID for pagination
+              lastMessageId = messages.last()?.id;
+
+              // If we fetched fewer than 100 messages, we've reached the end
+              if (messages.size < 100) {
+                hasMore = false;
+              }
+
+              // Small delay between batches to avoid rate limiting
+              await new Promise(resolve => setTimeout(resolve, 500));
             }
+
+            console.log(`     Fetched ${totalFetched} total messages (${channelCollected} new, rest were duplicates or filtered)`);
 
             if (channelCollected > 0) {
-              console.log(`     ✅ Collected ${channelCollected} messages from #${textChannel.name}`);
+              console.log(`     ✅ Collected ${channelCollected} new messages from #${textChannel.name}`);
             }
 
-            await new Promise(resolve => setTimeout(resolve, 100));
           } catch (error) {
             console.error(`     ❌ Failed to scan channel #${(channel as TextChannel).name}:`, error);
           }
