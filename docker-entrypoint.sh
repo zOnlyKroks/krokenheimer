@@ -27,12 +27,18 @@ echo "✅ Ollama is running"
 # Check if model exists, if not pull it
 MODEL_NAME="${OLLAMA_MODEL:-llama3.2:3b}"
 echo "🔍 Checking for model: $MODEL_NAME"
-if ! ollama list | grep -q "${MODEL_NAME%%:*}"; then
+
+# List all models
+echo "📋 Available models:"
+ollama list
+
+# Check if the specific model exists (match the full name or base name)
+if ollama list | grep -q "$MODEL_NAME" || ollama list | grep -q "${MODEL_NAME%%:*}"; then
+    echo "✅ Model $MODEL_NAME already exists, skipping download"
+else
     echo "📥 Pulling model $MODEL_NAME (this may take a few minutes)..."
     ollama pull "$MODEL_NAME"
     echo "✅ Model downloaded"
-else
-    echo "✅ Model already exists"
 fi
 
 # Wait for ChromaDB to be ready
