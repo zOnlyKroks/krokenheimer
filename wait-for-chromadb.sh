@@ -15,4 +15,4 @@ until nc -z $HOST $PORT; do
 done
 
 echo "ChromaDB is up. Starting Discord bot..."
-exec node /app/dist/bot.js
+exec node /app/dist/index.js
