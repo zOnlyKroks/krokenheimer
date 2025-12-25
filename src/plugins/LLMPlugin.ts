@@ -180,6 +180,7 @@ export class LLMPlugin implements BotPlugin {
     console.log('📅 Starting scheduled message generation...');
     console.log(`   Interval: ${this.config.minIntervalMinutes}-${this.config.maxIntervalMinutes} minutes`);
     console.log(`   Active hours: 08:00 - 24:00 (German time)`);
+    console.log(`   Activity requirement: Last message < 5 minutes ago`);
 
     // Schedule to run every minute, but use internal logic to randomize timing
     this.scheduledTask = cron.schedule('* * * * *', async () => {
@@ -245,6 +246,19 @@ export class LLMPlugin implements BotPlugin {
 
       // Pick a random channel
       const targetChannel = eligibleChannels[Math.floor(Math.random() * eligibleChannels.length)];
+
+      // Check if the channel has recent activity (last message < 5 minutes ago)
+      const recentMessages = messageStorageService.getRecentMessages(targetChannel.channelId, 1);
+      if (recentMessages.length === 0) {
+        console.log(`📝 No messages in #${targetChannel.channelName}, skipping`);
+        return;
+      }
+
+      const lastMessageAge = (now - recentMessages[0].timestamp) / 1000 / 60; // minutes
+      if (lastMessageAge > 5) {
+        console.log(`📝 #${targetChannel.channelName} is quiet (last message ${Math.round(lastMessageAge)} min ago), skipping`);
+        return;
+      }
 
       // Generate and send message
         // @ts-ignore
@@ -505,6 +519,7 @@ ${channelList}
 • Status: ${this.config.enabled ? '✅ Enabled' : '❌ Disabled'}
 • Active hours: 08:00 - 24:00 (German time)
 • Current time: ${germanDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} ${isActiveHours ? '✅' : '🌙 (outside active hours)'}
+• Activity requirement: Last message < 5 minutes ago
 • Interval: ${this.config.minIntervalMinutes}-${this.config.maxIntervalMinutes} minutes
 • Last generation: ${this.lastGenerationTime > 0 ? `${Math.round((Date.now() - this.lastGenerationTime) / 60000)} minutes ago` : 'Never'}
 
