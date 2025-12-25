@@ -47,27 +47,62 @@ else
     ollama list || echo "   (No models found - pull manually with: docker-compose exec krokenheimer ollama pull llama3.2:3b)"
 fi
 
-# Wait for ChromaDB to be ready
-echo "⏳ Waiting for ChromaDB to start..."
+# Wait for ChromaDB to be ready with proper health check
+echo "⏳ Waiting for ChromaDB to be ready..."
 attempt=0
-while ! curl -s http://localhost:8000/api/v1/heartbeat > /dev/null 2>&1; do
+max_chroma_attempts=60  # 2 minutes max
+
+while true; do
     attempt=$((attempt + 1))
-    if [ $attempt -ge $max_attempts ]; then
-        echo "❌ ChromaDB failed to start after ${max_attempts} seconds"
+
+    # Try to connect to ChromaDB heartbeat endpoint
+    if curl -s -f http://localhost:8000/api/v1/heartbeat > /dev/null 2>&1; then
+        echo "✅ ChromaDB is ready and accepting connections"
+        break
+    fi
+
+    if [ $attempt -ge $max_chroma_attempts ]; then
+        echo "❌ ChromaDB failed to become ready after ${max_chroma_attempts} attempts"
+        echo "Check ChromaDB logs: supervisorctl tail chromadb"
         exit 1
     fi
-    sleep 1
+
+    if [ $((attempt % 10)) -eq 0 ]; then
+        echo "   Still waiting for ChromaDB... (${attempt}/${max_chroma_attempts})"
+    fi
+
+    sleep 2
 done
-echo "✅ ChromaDB is running"
 
 echo ""
-echo "✅ All services started successfully!"
+echo "✅ All services ready!"
 echo ""
 echo "📋 Service Status:"
-echo "   Ollama:     http://localhost:11434"
-echo "   ChromaDB:   http://localhost:8000"
-echo "   Discord Bot: Starting..."
+echo "   Ollama:     http://localhost:11434 ✅"
+echo "   ChromaDB:   http://localhost:8000 ✅"
+echo "   Discord Bot: Starting now..."
 echo ""
+
+# Now start the Discord bot (autostart was set to false)
+supervisorctl start discord-bot
+
+# Wait a moment for it to start
+sleep 2
+
+# Check if bot started successfully
+if supervisorctl status discord-bot | grep -q "RUNNING"; then
+    echo "✅ Discord bot started successfully!"
+else
+    echo "❌ Discord bot failed to start"
+    supervisorctl status discord-bot
+fi
+
+echo ""
+echo "📋 All Services Status:"
+supervisorctl status
+
+echo ""
+echo "Container is ready. Tailing logs..."
 
 # Keep the container running by tailing supervisor logs
 tail -f /var/log/supervisor/supervisord.log

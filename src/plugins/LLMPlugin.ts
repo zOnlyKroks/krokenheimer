@@ -74,35 +74,16 @@ export class LLMPlugin implements BotPlugin {
       return;
     }
 
-    // Initialize vector store with retry
+    // Initialize vector store (ChromaDB should already be ready)
     console.log('3️⃣  Initializing ChromaDB...');
-    let chromaInitialized = false;
-    const maxRetries = 30; // 30 attempts = 1 minute max wait
-    const retryDelay = 2000; // 2 seconds
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`   Attempt ${attempt}/${maxRetries}...`);
-        await vectorStoreService.initialize();
-        chromaInitialized = true;
-        console.log(`   ✅ Connected on attempt ${attempt}`);
-        break;
-      } catch (error) {
-        if (attempt === maxRetries) {
-          console.error('❌ Failed to initialize ChromaDB after', maxRetries, 'attempts');
-          return;
-        }
-        if (attempt % 5 === 0) {
-          console.log(`   Still waiting for ChromaDB... (${attempt}/${maxRetries})`);
-        }
-        await new Promise(resolve => setTimeout(resolve, retryDelay));
-      }
-    }
-
-    if (!chromaInitialized) {
+    try {
+      await vectorStoreService.initialize();
+      console.log('✅ ChromaDB initialized');
+    } catch (error) {
+      console.error('❌ Failed to initialize ChromaDB');
+      console.error('Error:', error);
       return;
     }
-    console.log('✅ ChromaDB initialized');
 
     // Set up message collection listener
     client.on('messageCreate', async (message) => {
