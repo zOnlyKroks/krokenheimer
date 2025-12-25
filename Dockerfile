@@ -22,11 +22,15 @@ RUN apt-get update && apt-get install -y \
 # Install Ollama
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
-# Install ChromaDB in a virtual environment with explicit version
+# Install ChromaDB in a virtual environment
 RUN python3 -m venv /opt/chromadb-venv && \
-    /opt/chromadb-venv/bin/pip install --no-cache-dir chromadb==0.4.22 && \
-    /opt/chromadb-venv/bin/pip install --no-cache-dir 'pydantic<2.0.0' && \
-    /opt/chromadb-venv/bin/pip install --no-cache-dir sentence-transformers
+    /opt/chromadb-venv/bin/pip install --no-cache-dir chromadb
+
+# Test ChromaDB installation
+RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import successful')" && \
+    echo '#!/bin/bash' > /usr/local/bin/run-chromadb && \
+    echo '/opt/chromadb-venv/bin/python -m chromadb.cli.cli run --host 0.0.0.0 --port 8000 --path \$1' >> /usr/local/bin/run-chromadb && \
+    chmod +x /usr/local/bin/run-chromadb
 
 # Create app directory
 WORKDIR /app
@@ -53,10 +57,6 @@ COPY docker-supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 # Copy Docker entrypoint
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Create a simple test script for ChromaDB
-RUN echo '#!/bin/bash\n/opt/chromadb-venv/bin/python3 -c "import chromadb; print(\"ChromaDB imported successfully\")"' > /test_chromadb.sh && \
-    chmod +x /test_chromadb.sh
 
 # Expose ports
 EXPOSE 11434 8000
