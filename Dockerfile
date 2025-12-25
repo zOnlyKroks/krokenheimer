@@ -16,14 +16,17 @@ RUN apt-get update && apt-get install -y \
     curl \
     sqlite3 \
     supervisor \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Ollama
 RUN curl -fsSL https://ollama.com/install.sh | sh
 
-# Install ChromaDB in a virtual environment
+# Install ChromaDB in a virtual environment with explicit version
 RUN python3 -m venv /opt/chromadb-venv && \
-    /opt/chromadb-venv/bin/pip install --no-cache-dir chromadb
+    /opt/chromadb-venv/bin/pip install --no-cache-dir chromadb==0.4.22 && \
+    /opt/chromadb-venv/bin/pip install --no-cache-dir 'pydantic<2.0.0' && \
+    /opt/chromadb-venv/bin/pip install --no-cache-dir sentence-transformers
 
 # Create app directory
 WORKDIR /app
@@ -51,7 +54,11 @@ COPY docker-supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Expose ports (if needed for health checks)
+# Create a simple test script for ChromaDB
+RUN echo '#!/bin/bash\n/opt/chromadb-venv/bin/python3 -c "import chromadb; print(\"ChromaDB imported successfully\")"' > /test_chromadb.sh && \
+    chmod +x /test_chromadb.sh
+
+# Expose ports
 EXPOSE 11434 8000
 
 # Use entrypoint script
