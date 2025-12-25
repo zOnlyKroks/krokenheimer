@@ -6,6 +6,7 @@ import { BioinformaticsPlugin } from "./plugins/BioinformaticsPlugin.js";
 import { CalculatorPlugin } from "./plugins/CalculatorPlugin.js";
 import { ASCIIArtPlugin } from "./plugins/ASCIIArtPlugin.js";
 import { DownCheckerPlugin } from "./plugins/DownCheckerPlugin.js";
+import { LLMPlugin } from "./plugins/LLMPlugin.js";
 dotenv.config();
 async function main() {
     const config = {
@@ -23,6 +24,7 @@ async function main() {
         await bot.loadPlugin(new CalculatorPlugin());
         await bot.loadPlugin(new ASCIIArtPlugin());
         await bot.loadPlugin(new DownCheckerPlugin());
+        await bot.loadPlugin(new LLMPlugin());
         await bot.start();
         console.log("🚀 Bot started successfully!");
     }
