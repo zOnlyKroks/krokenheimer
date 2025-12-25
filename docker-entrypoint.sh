@@ -49,26 +49,61 @@ fi
 
 # Wait for ChromaDB to be ready with proper health check
 echo "⏳ Waiting for ChromaDB to be ready..."
+
+# First check if ChromaDB process is running
+sleep 5
+if ! supervisorctl status chromadb | grep -q "RUNNING"; then
+    echo "❌ ChromaDB process is not running!"
+    echo "ChromaDB status:"
+    supervisorctl status chromadb
+    echo ""
+    echo "ChromaDB logs:"
+    supervisorctl tail -50 chromadb
+    exit 1
+fi
+
+echo "✅ ChromaDB process is running"
+echo "⏳ Waiting for HTTP endpoint to respond..."
+
 attempt=0
 max_chroma_attempts=60  # 2 minutes max
 
 while true; do
     attempt=$((attempt + 1))
 
+    # Check if port 8000 is listening
+    if [ $attempt -eq 5 ]; then
+        echo "   Checking if port 8000 is listening..."
+        netstat -tuln | grep 8000 || echo "   Port 8000 not found"
+    fi
+
     # Try to connect to ChromaDB heartbeat endpoint
-    if curl -s -f http://localhost:8000/api/v1/heartbeat > /dev/null 2>&1; then
+    response=$(curl -s -w "\n%{http_code}" http://localhost:8000/api/v1/heartbeat 2>&1)
+    http_code=$(echo "$response" | tail -n1)
+
+    if [ "$http_code" = "200" ]; then
         echo "✅ ChromaDB is ready and accepting connections"
         break
     fi
 
     if [ $attempt -ge $max_chroma_attempts ]; then
         echo "❌ ChromaDB failed to become ready after ${max_chroma_attempts} attempts"
-        echo "Check ChromaDB logs: supervisorctl tail chromadb"
+        echo ""
+        echo "Last HTTP response code: $http_code"
+        echo ""
+        echo "ChromaDB status:"
+        supervisorctl status chromadb
+        echo ""
+        echo "Listening ports:"
+        netstat -tuln | grep LISTEN
+        echo ""
+        echo "ChromaDB recent logs:"
+        supervisorctl tail -100 chromadb
         exit 1
     fi
 
     if [ $((attempt % 10)) -eq 0 ]; then
-        echo "   Still waiting for ChromaDB... (${attempt}/${max_chroma_attempts})"
+        echo "   Still waiting for ChromaDB HTTP... (${attempt}/${max_chroma_attempts})"
     fi
 
     sleep 2
