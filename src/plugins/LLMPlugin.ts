@@ -74,13 +74,29 @@ export class LLMPlugin implements BotPlugin {
       return;
     }
 
-    // Initialize vector store
+    // Initialize vector store with retry
     console.log('3️⃣  Initializing ChromaDB...');
-    try {
-      await vectorStoreService.initialize();
-    } catch (error) {
-      console.error('❌ Failed to initialize ChromaDB. Make sure it is running.');
-      console.error('Error:', error);
+    let chromaInitialized = false;
+    const maxRetries = 10;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`   Attempt ${attempt}/${maxRetries}...`);
+        await vectorStoreService.initialize();
+        chromaInitialized = true;
+        break;
+      } catch (error) {
+        if (attempt === maxRetries) {
+          console.error('❌ Failed to initialize ChromaDB after', maxRetries, 'attempts');
+          console.error('Error:', error);
+          return;
+        }
+        console.log(`   Connection failed, retrying in 2 seconds...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+
+    if (!chromaInitialized) {
       return;
     }
     console.log('✅ ChromaDB initialized');
