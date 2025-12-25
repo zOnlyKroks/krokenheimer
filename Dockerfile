@@ -32,23 +32,21 @@ RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import su
     echo 'exec /opt/chromadb-venv/bin/chroma run --host 0.0.0.0 --port 8000 --path "$1"' >> /usr/local/bin/run-chromadb && \
     chmod +x /usr/local/bin/run-chromadb
 
-# Install Unsloth training environment (separate venv)
-# Note: Unsloth will auto-detect CPU/GPU at runtime
+# Install CPU-compatible training environment (no Unsloth - requires GPU)
+# Using standard HuggingFace Transformers + PEFT for LoRA training
 RUN python3 -m venv /opt/training-venv && \
     /opt/training-venv/bin/pip install --upgrade pip && \
     /opt/training-venv/bin/pip install --no-cache-dir \
-    torch \
+    torch --index-url https://download.pytorch.org/whl/cpu && \
+    /opt/training-venv/bin/pip install --no-cache-dir \
     transformers \
     trl \
     datasets \
     accelerate \
-    peft \
-    bitsandbytes \
-    "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" || \
-    echo "⚠️  Unsloth install warning (this is OK - needs GPU/CPU detection at runtime)"
+    peft
 
-# Verify basic Python packages (skip unsloth import as it needs runtime device detection)
-RUN /opt/training-venv/bin/python -c "import torch, transformers, trl; print('Training dependencies installed')"
+# Verify installation
+RUN /opt/training-venv/bin/python -c "import torch, transformers, trl, peft; print('✅ CPU training environment ready')"
 
 WORKDIR /app
 

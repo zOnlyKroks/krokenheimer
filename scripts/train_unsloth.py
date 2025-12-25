@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """
-Unsloth LoRA Fine-tuning Script for Krokenheimer Bot
-Trains on CPU with quantization for memory efficiency
+CPU-Compatible LoRA Fine-tuning Script for Krokenheimer Bot
+Uses HuggingFace Transformers + PEFT (no Unsloth - that requires GPU)
 """
 
 import json
 import sys
 import torch
-from unsloth import FastLanguageModel
-from trl import SFTTrainer
-from transformers import TrainingArguments
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    TrainingArguments,
+    Trainer,
+    DataCollatorForLanguageModeling
+)
+from peft import LoraConfig, get_peft_model, TaskType
 from datasets import load_dataset
 
 # Config
 MAX_SEQ_LENGTH = 2048
-LOAD_IN_4BIT = True  # Use 4-bit quantization to save RAM
 
 def load_training_data(jsonl_path):
     """Load JSONL training data"""
@@ -23,7 +27,7 @@ def load_training_data(jsonl_path):
     print(f"✅ Loaded {len(dataset)} training examples")
     return dataset
 
-def format_prompts(examples):
+def format_prompts(examples, tokenizer):
     """Format data for training"""
     texts = []
     for messages in examples['messages']:
@@ -37,82 +41,90 @@ def format_prompts(examples):
             elif msg['role'] == 'assistant':
                 text += f"### Assistant:\n{msg['content']}"
         texts.append(text)
-    return {"text": texts}
+
+    # Tokenize
+    return tokenizer(texts, truncation=True, max_length=MAX_SEQ_LENGTH, padding="max_length")
 
 def main():
     if len(sys.argv) < 4:
-        print("Usage: train_unsloth.py <base_model> <training_data.jsonl> <output_model_name>")
+        print("Usage: train_cpu.py <base_model> <training_data.jsonl> <output_model_name>")
         sys.exit(1)
 
     base_model = sys.argv[1]
     training_data_path = sys.argv[2]
     output_model_name = sys.argv[3]
 
-    print("🚀 Starting Unsloth LoRA Fine-tuning")
+    print("🚀 Starting CPU LoRA Fine-tuning (HuggingFace + PEFT)")
     print(f"   Base model: {base_model}")
     print(f"   Output: {output_model_name}")
-    print(f"   Device: {'CPU (slow but works)' if not torch.cuda.is_available() else 'GPU'}")
+    print(f"   Device: CPU (expect 3-7 days)")
 
-    # Load model with LoRA
+    # Load model and tokenizer
     print("\n📥 Loading base model...")
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=base_model,
-        max_seq_length=MAX_SEQ_LENGTH,
-        dtype=None,  # Auto-detect best dtype
-        load_in_4bit=LOAD_IN_4BIT,
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        base_model,
+        torch_dtype=torch.float32,  # CPU needs float32
+        low_cpu_mem_usage=True
     )
 
     # Add LoRA adapters
     print("🔧 Adding LoRA adapters...")
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=16,  # LoRA rank (higher = more capacity, slower)
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                       "gate_proj", "up_proj", "down_proj"],
+    lora_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        r=16,  # LoRA rank
         lora_alpha=16,
-        lora_dropout=0.0,  # Optimized for small datasets
-        bias="none",
-        use_gradient_checkpointing="unsloth",  # Memory efficient
-        random_state=42,
+        lora_dropout=0.0,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        bias="none"
     )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
 
     # Load and format dataset
     dataset = load_training_data(training_data_path)
-    dataset = dataset.map(format_prompts, batched=True)
+    dataset = dataset.map(
+        lambda x: format_prompts(x, tokenizer),
+        batched=True,
+        remove_columns=dataset.column_names
+    )
 
     # Training arguments optimized for CPU
     print("\n⚙️  Setting up training...")
     training_args = TrainingArguments(
         output_dir=f"./data/checkpoints/{output_model_name}",
-        per_device_train_batch_size=1,  # Small batch for CPU
-        gradient_accumulation_steps=4,   # Effective batch size = 4
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
         warmup_steps=10,
-        max_steps=200,  # Adjust based on dataset size
+        max_steps=200,
         learning_rate=2e-4,
         fp16=False,  # CPU doesn't support fp16
-        bf16=False,  # Most CPUs don't support bf16
         logging_steps=10,
-        optim="adamw_8bit",  # Memory efficient optimizer
-        weight_decay=0.01,
-        lr_scheduler_type="linear",
         save_strategy="steps",
         save_steps=50,
-        save_total_limit=2,  # Keep only 2 checkpoints
+        save_total_limit=2,
+        dataloader_num_workers=0,  # Important for CPU
+    )
+
+    # Data collator
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False
     )
 
     # Create trainer
-    trainer = SFTTrainer(
+    trainer = Trainer(
         model=model,
-        tokenizer=tokenizer,
-        train_dataset=dataset,
-        dataset_text_field="text",
-        max_seq_length=MAX_SEQ_LENGTH,
         args=training_args,
+        train_dataset=dataset,
+        data_collator=data_collator,
     )
 
     # Train
     print("\n🏋️  Starting training...")
-    print("⏳ This will take 3-7 days on CPU. Grab a coffee (or 100)...")
+    print("⏳ This will take 3-7 days on CPU. Go touch grass...")
     trainer.train()
 
     # Save LoRA adapters
@@ -120,17 +132,9 @@ def main():
     model.save_pretrained(f"./data/models/{output_model_name}")
     tokenizer.save_pretrained(f"./data/models/{output_model_name}")
 
-    # Export to GGUF for Ollama
-    print("\n📦 Exporting to GGUF for Ollama...")
-    model.save_pretrained_gguf(
-        f"./data/models/{output_model_name}",
-        tokenizer,
-        quantization_method="q4_k_m"  # Good balance of size/quality
-    )
-
     print(f"\n✅ Training complete!")
     print(f"📁 Model saved to: ./data/models/{output_model_name}")
-    print(f"📦 GGUF file ready for Ollama import")
+    print(f"💡 Import to Ollama with the saved model files")
 
 if __name__ == "__main__":
     main()

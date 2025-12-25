@@ -68,25 +68,27 @@ export class FineTuningService {
       .catch(() => 'python3');
 
     return new Promise((resolve) => {
-      const checkProcess = spawn(pythonCmd, ['-c', 'import unsloth; print("OK")']);
-
-      let output = '';
-      checkProcess.stdout.on('data', (data) => {
-        output += data.toString();
-      });
+      // Check if packages are installed (don't import unsloth as it needs GPU/CPU detection)
+      const checkProcess = spawn(pythonCmd, [
+        '-c',
+        'import sys; import torch, transformers, trl, datasets; sys.exit(0)'
+      ]);
 
       checkProcess.on('close', (code) => {
-        if (code === 0 && output.includes('OK')) {
-          console.log('✅ Python environment ready');
+        if (code === 0) {
+          console.log('✅ Python environment ready (torch, transformers, trl, datasets installed)');
           resolve(true);
         } else {
-          console.error('❌ Unsloth not installed');
+          console.error('❌ Training dependencies not installed');
+          console.error('   Missing: torch, transformers, trl, or datasets');
+          console.error('   Run: ./scripts/setup_training.sh');
           resolve(false);
         }
       });
 
       checkProcess.on('error', () => {
         console.error('❌ Python not found');
+        console.error('   Run: ./scripts/setup_training.sh');
         resolve(false);
       });
     });
@@ -305,17 +307,17 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
   }
 
   private ollamaToHuggingFace(ollamaModel: string): string {
-    // Map common Ollama models to HuggingFace Unsloth versions
+    // Map common Ollama models to standard HuggingFace models
     const modelMap: Record<string, string> = {
-      'llama3.2:3b': 'unsloth/Llama-3.2-3B-Instruct',
-      'llama3.2:1b': 'unsloth/Llama-3.2-1B-Instruct',
-      'llama3.1:8b': 'unsloth/Meta-Llama-3.1-8B-Instruct',
-      'llama3:8b': 'unsloth/llama-3-8b-Instruct',
-      'mistral:7b': 'unsloth/mistral-7b-instruct-v0.3',
+      'llama3.2:3b': 'meta-llama/Llama-3.2-3B-Instruct',
+      'llama3.2:1b': 'meta-llama/Llama-3.2-1B-Instruct',
+      'llama3.1:8b': 'meta-llama/Meta-Llama-3.1-8B-Instruct',
+      'llama3:8b': 'meta-llama/Meta-Llama-3-8B-Instruct',
+      'mistral:7b': 'mistralai/Mistral-7B-Instruct-v0.3',
     };
 
     // @ts-ignore
-      return modelMap[ollamaModel] || modelMap['llama3.2:3b'];
+    return modelMap[ollamaModel] || modelMap['llama3.2:3b'];
   }
 
   private async importGGUFToOllama(modelName: string): Promise<void> {
