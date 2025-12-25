@@ -28,17 +28,26 @@ export class OllamaService {
   async ensureModelExists(): Promise<boolean> {
     try {
       const models = await this.ollama.list();
+      console.log(`🔍 Checking for model: ${this.config.model}`);
+      console.log(`📋 Available models:`, models.models.map(m => m.name));
+
       // @ts-ignore
-        const hasModel = models.models.some(m => m.name.includes(this.config.model.split(':')[0]));
+      const hasModel = models.models.some(m => {
+        const modelName = m.name;
+        const targetName = this.config.model;
+        // Match either exact name or base name (e.g., llama3.2 matches llama3.2:3b)
+        return modelName === targetName || modelName.startsWith(targetName.split(':')[0]);
+      });
 
       if (!hasModel) {
-        console.log(`Model ${this.config.model} not found. Please run: ollama pull ${this.config.model}`);
+        console.log(`❌ Model ${this.config.model} not found. Please run: ollama pull ${this.config.model}`);
         return false;
       }
 
+      console.log(`✅ Model ${this.config.model} is available`);
       return true;
     } catch (error) {
-      console.error('Failed to check model:', error);
+      console.error('❌ Failed to check model:', error);
       return false;
     }
   }

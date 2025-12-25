@@ -57,27 +57,33 @@ export class LLMPlugin implements BotPlugin {
     console.log('🤖 Initializing LLM Plugin...');
 
     // Check Ollama connection
+    console.log('1️⃣  Checking Ollama connection...');
     const ollamaConnected = await ollamaService.checkConnection();
     if (!ollamaConnected) {
-      console.error('⚠️  Ollama is not running. Please start Ollama first: https://ollama.ai');
+      console.error('❌ Ollama is not running. Please start Ollama first: https://ollama.ai');
       console.log('💡 After installing Ollama, run: ollama pull llama3.2:3b');
       return;
     }
+    console.log('✅ Ollama is connected');
 
     // Ensure model exists
+    console.log('2️⃣  Checking if model exists...');
     const modelExists = await ollamaService.ensureModelExists();
     if (!modelExists) {
-      console.error('⚠️  Required model not found. Run: ollama pull llama3.2:3b');
+      console.error('❌ Required model not found. Run: ollama pull llama3.2:3b');
       return;
     }
 
     // Initialize vector store
+    console.log('3️⃣  Initializing ChromaDB...');
     try {
       await vectorStoreService.initialize();
     } catch (error) {
-      console.error('⚠️  Failed to initialize ChromaDB. Make sure it is running.');
+      console.error('❌ Failed to initialize ChromaDB. Make sure it is running.');
+      console.error('Error:', error);
       return;
     }
+    console.log('✅ ChromaDB initialized');
 
     // Set up message collection listener
     client.on('messageCreate', async (message) => {
