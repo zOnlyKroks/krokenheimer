@@ -54,10 +54,18 @@ def main():
     training_data_path = sys.argv[2]
     output_model_name = sys.argv[3]
 
+    # Set nice priority to not kill the server
+    import os
+    os.nice(19)  # Lowest CPU priority
+
+    # Limit threads to prevent CPU overload
+    torch.set_num_threads(2)  # Use only 2 CPU threads
+
     print("🚀 Starting CPU LoRA Fine-tuning (HuggingFace + PEFT)")
     print(f"   Base model: {base_model}")
     print(f"   Output: {output_model_name}")
     print(f"   Device: CPU (expect 3-7 days)")
+    print(f"   ⚙️  CPU threads limited to 2 (low priority)")
 
     # Load model and tokenizer
     print("\n📥 Loading base model...")

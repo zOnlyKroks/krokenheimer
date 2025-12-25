@@ -7,7 +7,7 @@ export class FineTuningService {
   private isTraining = false;
   private messagesSinceLastTrain = 0;
   private lastTrainMessageCount = 0;
-  private trainingThreshold = 50; // Retrain every x new messages
+  private trainingThreshold = 999999; // Disabled - train manually with !llmtrain now
   private modelBaseName = 'krokenheimer';
   private modelVersion = 0;
 
