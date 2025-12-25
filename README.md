@@ -21,6 +21,24 @@ An extensible Discord bot with plugin architecture featuring automated LLM-power
 
 ## Quick Start
 
+### Docker (Recommended - Includes Everything)
+
+**Easiest way to run with full LLM features:**
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Edit .env and add your BOT_TOKEN
+
+# 2. Start everything
+docker-compose up -d
+
+# 3. View logs
+docker-compose logs -f
+```
+
+See [DOCKER.md](DOCKER.md) for detailed Docker instructions.
+
 ### Basic Setup (Without LLM)
 
 ```bash

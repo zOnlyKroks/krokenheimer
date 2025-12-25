@@ -28,15 +28,18 @@ RUN python3 -m venv /opt/chromadb-venv && \
 # Create app directory
 WORKDIR /app
 
-# Copy package files and install Node dependencies
+# Copy package files and install ALL dependencies (needed for build)
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install
 
 # Copy application code
 COPY . .
 
 # Build TypeScript
 RUN npm run build
+
+# Remove dev dependencies to reduce image size
+RUN npm prune --production
 
 # Create data directories
 RUN mkdir -p /app/data /app/chroma_data

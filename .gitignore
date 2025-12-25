@@ -2,3 +2,5 @@
 node_modules/
 dist/
 data/
+chroma_data/
+*.log
