@@ -14,6 +14,9 @@ services:
       # Persist Ollama models (so you don't re-download on container restart)
       - ollama_models:/root/.ollama
     environment:
+      # Discord Bot Configuration
+      - BOT_TOKEN=${BOT_TOKEN}
+      - BOT_OWNERS=${BOT_OWNERS}
       # LLM Configuration (can override in .env)
       - LLM_ENABLED=${LLM_ENABLED:-true}
       - LLM_MIN_INTERVAL_MINUTES=${LLM_MIN_INTERVAL_MINUTES:-60}
