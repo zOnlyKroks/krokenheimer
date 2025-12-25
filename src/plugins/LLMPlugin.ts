@@ -143,6 +143,7 @@ export class LLMPlugin implements BotPlugin {
   private startScheduledGeneration(): void {
     console.log('📅 Starting scheduled message generation...');
     console.log(`   Interval: ${this.config.minIntervalMinutes}-${this.config.maxIntervalMinutes} minutes`);
+    console.log(`   Active hours: 08:00 - 24:00 (German time)`);
 
     // Schedule to run every minute, but use internal logic to randomize timing
     this.scheduledTask = cron.schedule('* * * * *', async () => {
@@ -152,6 +153,16 @@ export class LLMPlugin implements BotPlugin {
 
   private async tryGenerateMessage(): Promise<void> {
     if (!this.isInitialized || !this.client) {
+      return;
+    }
+
+    // Check if current time is within allowed hours (8:00 - 24:00 German time)
+    const germanTime = new Date().toLocaleString('en-US', { timeZone: 'Europe/Berlin' });
+    const germanDate = new Date(germanTime);
+    const currentHour = germanDate.getHours();
+
+    if (currentHour < 8 || currentHour >= 24) {
+      // Outside allowed hours, skip generation silently
       return;
     }
 
@@ -427,6 +438,12 @@ export class LLMPlugin implements BotPlugin {
       const activeChannels = messageStorageService.getActiveChannels();
       const llmConfig = ollamaService.getConfig();
 
+      // Get current German time
+      const germanTime = new Date().toLocaleString('en-US', { timeZone: 'Europe/Berlin' });
+      const germanDate = new Date(germanTime);
+      const currentHour = germanDate.getHours();
+      const isActiveHours = currentHour >= 8 && currentHour < 24;
+
       const channelList = activeChannels
         .slice(0, 10)
         .map(ch => `• #${ch.channelName}: ${ch.count} messages`)
@@ -450,6 +467,8 @@ ${channelList}
 
 **Auto-generation:**
 • Status: ${this.config.enabled ? '✅ Enabled' : '❌ Disabled'}
+• Active hours: 08:00 - 24:00 (German time)
+• Current time: ${germanDate.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} ${isActiveHours ? '✅' : '🌙 (outside active hours)'}
 • Interval: ${this.config.minIntervalMinutes}-${this.config.maxIntervalMinutes} minutes
 • Last generation: ${this.lastGenerationTime > 0 ? `${Math.round((Date.now() - this.lastGenerationTime) / 60000)} minutes ago` : 'Never'}
 
