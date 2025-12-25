@@ -21,6 +21,7 @@ export class LLMPlugin implements BotPlugin {
   private lastGenerationTime = 0;
   private scanIntervalMinutes = 2;
   private lastScanTime = 0;
+  private isScanning = false;
 
   commands: BotCommand[] = [
     {
@@ -250,6 +251,10 @@ export class LLMPlugin implements BotPlugin {
       const timeSinceLastScan = (now - this.lastScanTime) / 1000 / 60; // minutes
 
       if (timeSinceLastScan >= this.scanIntervalMinutes) {
+        if (this.isScanning) {
+          console.log('⏭️  Skipping scheduled scan - scan already in progress');
+          return;
+        }
         console.log('🔍 Starting scheduled channel scan...');
         await this.scanAllChannels();
         this.lastScanTime = now;
@@ -262,6 +267,15 @@ export class LLMPlugin implements BotPlugin {
       console.log('⚠️  Cannot scan: client not initialized');
       return;
     }
+
+    // Check if already scanning
+    if (this.isScanning) {
+      console.log('⚠️  Scan already in progress, skipping');
+      return;
+    }
+
+    // Set scanning flag
+    this.isScanning = true;
 
     try {
       const guilds = this.client.guilds.cache;
@@ -353,6 +367,9 @@ export class LLMPlugin implements BotPlugin {
 
     } catch (error) {
       console.error('Failed to scan channels:', error);
+    } finally {
+      // Always clear the scanning flag, even if there was an error
+      this.isScanning = false;
     }
   }
 
@@ -364,6 +381,7 @@ export class LLMPlugin implements BotPlugin {
 
 • Scan interval: ${this.scanIntervalMinutes} minutes
 • Last scan: ${this.lastScanTime > 0 ? `${Math.round((Date.now() - this.lastScanTime) / 60000)} minutes ago` : 'Never'}
+• Status: ${this.isScanning ? '🔄 Scan in progress...' : '✅ Idle'}
 
 **Usage:**
 \`!llmscan <minutes>\` - Set scan interval (1-60 minutes)
@@ -377,6 +395,11 @@ export class LLMPlugin implements BotPlugin {
 
     // Trigger immediate scan
     if (arg === 'now') {
+      if (this.isScanning) {
+        await message.reply('⚠️  A scan is already in progress. Please wait for it to complete.');
+        return;
+      }
+
       await message.reply('🔍 Starting channel scan...');
       const startTime = Date.now();
       await this.scanAllChannels();
@@ -433,6 +456,7 @@ ${channelList}
 **Channel Scanning:**
 • Scan interval: ${this.scanIntervalMinutes} minutes
 • Last scan: ${this.lastScanTime > 0 ? `${Math.round((Date.now() - this.lastScanTime) / 60000)} minutes ago` : 'Never'}
+• Status: ${this.isScanning ? '🔄 Scan in progress...' : '✅ Idle'}
       `;
 
       await message.reply(statsText);
