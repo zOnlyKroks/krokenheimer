@@ -60,6 +60,11 @@ RUN npm install
 
 COPY . .
 RUN npm run build
+
+# Debug: Check if dist exists
+RUN ls -la /app/dist || echo "❌ dist folder not found!"
+RUN test -f /app/dist/index.js && echo "✅ index.js exists" || echo "❌ index.js missing!"
+
 RUN npm prune --production
 
 RUN mkdir -p /app/data /app/chroma_data /app/data/models /app/data/checkpoints /var/log/supervisor
