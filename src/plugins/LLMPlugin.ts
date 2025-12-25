@@ -112,6 +112,11 @@ export class LLMPlugin implements BotPlugin {
     try {
       console.log(`🔔 Bot mentioned by ${message.author.username} in #${message.channel.isDMBased() ? 'DM' : (message.channel as TextChannel).name}`);
 
+      // Show typing indicator
+      if ('sendTyping' in message.channel) {
+        await message.channel.sendTyping().catch(() => {});
+      }
+
       // Get recent messages for context
       const channelId = message.channel.id;
       const recentMessages = messageStorageService.getRecentMessages(channelId, 30);
@@ -122,7 +127,7 @@ export class LLMPlugin implements BotPlugin {
         return;
       }
 
-      // Generate a response using the LLM
+      // Generate a response using the LLM (this takes time)
       const response = await ollamaService.generateMentionResponse(recentMessages, message.content, message.author.username);
 
       await message.reply(response);
