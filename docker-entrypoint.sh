@@ -10,6 +10,20 @@ mkdir -p /var/log/supervisor
 echo "📡 Starting services..."
 /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf &
 
+# Wait for supervisord to be ready
+echo "⏳ Waiting for supervisord to start..."
+sleep 2
+attempt=0
+while [ ! -S /var/run/supervisor.sock ]; do
+    attempt=$((attempt + 1))
+    if [ $attempt -ge 10 ]; then
+        echo "❌ Supervisord socket not found"
+        exit 1
+    fi
+    sleep 1
+done
+echo "✅ Supervisord is ready"
+
 # Wait for Ollama to be ready
 echo "⏳ Waiting for Ollama to start..."
 max_attempts=30
