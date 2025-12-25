@@ -346,6 +346,39 @@ export class LLMPlugin implements BotPlugin {
     });
   }
 
+  private async fetchMessagesWithRetry(
+    textChannel: TextChannel,
+    options: { limit: number; before?: string },
+    maxRetries: number = 3
+  ): Promise<any> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Increase timeout to 30 seconds for slow connections
+        const messages = await textChannel.messages.fetch({
+          ...options,
+          // @ts-ignore - time property exists but not in types
+          time: 30000
+        });
+        return messages;
+      } catch (error: any) {
+        lastError = error;
+        console.log(`  ⚠️  Fetch attempt ${attempt}/${maxRetries} failed: ${error.message}`);
+
+        if (attempt < maxRetries) {
+          // Exponential backoff: 2s, 4s, 8s
+          const backoffMs = Math.pow(2, attempt) * 1000;
+          console.log(`  ⏳ Retrying in ${backoffMs / 1000}s...`);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        }
+      }
+    }
+
+    // All retries failed
+    throw lastError || new Error('Failed to fetch messages after retries');
+  }
+
   private async scanAllChannels(): Promise<void> {
     if (!this.client || !this.isInitialized) {
       console.log('⚠️  Cannot scan: client not initialized');
@@ -394,10 +427,10 @@ export class LLMPlugin implements BotPlugin {
             // Get last scanned timestamp for this channel
             const lastScannedTimestamp = messageStorageService.getLastScannedTimestamp(textChannel.id);
             const timeSinceLastScan = lastScannedTimestamp > 0
-              ? Math.round((Date.now() - lastScannedTimestamp) / 1000 / 60)
+              ? `${Math.round((Date.now() - lastScannedTimestamp) / 1000 / 60)} min`
               : 'never';
 
-            console.log(`  📝 Scanning #${textChannel.name} (last scan: ${timeSinceLastScan} min ago)...`);
+            console.log(`  📝 Scanning #${textChannel.name} (last: ${timeSinceLastScan} ago)...`);
 
             // Fetch messages AFTER last scanned timestamp
             let lastMessageId: string | undefined;
@@ -412,7 +445,8 @@ export class LLMPlugin implements BotPlugin {
                 options.before = lastMessageId;
               }
 
-              const messages = await textChannel.messages.fetch(options);
+              // Fetch with retry logic and increased timeout
+              const messages = await this.fetchMessagesWithRetry(textChannel, options);
               totalFetched += messages.size;
 
               if (messages.size === 0) {
