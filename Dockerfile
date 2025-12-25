@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
     sqlite3 \
     supervisor \
     net-tools \
-    netcat \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Ollama
