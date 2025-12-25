@@ -59,11 +59,13 @@ COPY package*.json ./
 RUN npm install
 
 COPY . .
-RUN npm run build
 
-# Debug: Check if dist exists
-RUN ls -la /app/dist || echo "❌ dist folder not found!"
-RUN test -f /app/dist/index.js && echo "✅ index.js exists" || echo "❌ index.js missing!"
+# Show TypeScript build output
+RUN echo "🔨 Building TypeScript..." && \
+    npm run build && \
+    echo "📦 Build complete. Checking output..." && \
+    ls -la /app/dist && \
+    test -f /app/dist/index.js && echo "✅ index.js exists" || echo "❌ index.js missing!"
 
 RUN npm prune --production
 
