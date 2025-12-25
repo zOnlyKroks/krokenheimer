@@ -293,19 +293,12 @@ export class LLMPlugin implements BotPlugin {
             totalScanned++;
             const textChannel = channel as TextChannel;
 
-            // Fetch last 50 messages
             console.log(`  📝 Scanning #${textChannel.name}...`);
-            const messages = await textChannel.messages.fetch({ limit: 50 });
+            const messages = await textChannel.messages.fetch();
             console.log(`     Fetched ${messages.size} messages`);
 
             let channelCollected = 0;
             for (const [, msg] of messages) {
-              // Skip if already stored (check by timestamp - only collect recent messages from last 24 hours)
-              const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
-              if (msg.createdTimestamp < oneDayAgo) {
-                continue;
-              }
-
               if (!msg.author.bot && msg.content && msg.content.trim() !== '' && !msg.content.startsWith('!')) {
                 await this.collectMessage(msg);
                 totalCollected++;
@@ -317,9 +310,7 @@ export class LLMPlugin implements BotPlugin {
               console.log(`     ✅ Collected ${channelCollected} messages from #${textChannel.name}`);
             }
 
-            // Small delay to avoid rate limits
             await new Promise(resolve => setTimeout(resolve, 100));
-
           } catch (error) {
             console.error(`     ❌ Failed to scan channel #${(channel as TextChannel).name}:`, error);
           }
