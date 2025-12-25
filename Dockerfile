@@ -50,10 +50,10 @@ RUN python3 -m venv /opt/training-venv && \
 # Verify basic Python packages (skip unsloth import as it needs runtime device detection)
 RUN /opt/training-venv/bin/python -c "import torch, transformers, trl; print('Training dependencies installed')"
 
+WORKDIR /app
+
 # Symlink training venv to app directory for bot access
 RUN ln -s /opt/training-venv /app/venv
-
-WORKDIR /app
 
 COPY package*.json ./
 RUN npm install
