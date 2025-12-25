@@ -207,8 +207,14 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
       console.log(`   Base model: ${hfModel}`);
       console.log(`   Training data: ${trainingDataPath}`);
 
-      // Run Python training script
-      const pythonProcess = spawn('python3', [
+      // Run Python training script (use venv if available)
+      const pythonCmd = await fs.access('./venv/bin/python3')
+        .then(() => './venv/bin/python3')
+        .catch(() => 'python3');
+
+      console.log(`   Python: ${pythonCmd}`);
+
+      const pythonProcess = spawn(pythonCmd, [
         './scripts/train_unsloth.py',
         hfModel,
         trainingDataPath,
