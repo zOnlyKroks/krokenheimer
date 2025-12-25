@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { existsSync } from "fs";
 import { ExtensibleBot } from "./core/Bot.js";
 import { GifPlugin } from "./plugins/GifPlugin.js";
 import { CorePlugin } from "./plugins/CorePlugin.js";
@@ -7,8 +8,23 @@ import { CalculatorPlugin } from "./plugins/CalculatorPlugin.js";
 import { ASCIIArtPlugin } from "./plugins/ASCIIArtPlugin.js";
 import { DownCheckerPlugin } from "./plugins/DownCheckerPlugin.js";
 import { LLMPlugin } from "./plugins/LLMPlugin.js";
-dotenv.config();
+// Only load .env file if it exists (for local development)
+// In Docker, environment variables are passed directly
+if (existsSync('.env')) {
+    dotenv.config();
+}
+else {
+    console.log('No .env file found, using environment variables from system');
+}
 async function main() {
+    // Validate required environment variables
+    if (!process.env.BOT_TOKEN) {
+        console.error('❌ BOT_TOKEN environment variable is not set!');
+        console.error('   Set it in .env file or pass it via docker-compose');
+        process.exit(1);
+    }
+    console.log('✅ BOT_TOKEN is set');
+    console.log(`✅ BOT_OWNERS: ${process.env.BOT_OWNERS || '(none)'}`);
     const config = {
         prefix: "!",
         token: process.env.BOT_TOKEN,

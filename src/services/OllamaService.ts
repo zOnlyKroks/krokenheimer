@@ -36,7 +36,8 @@ export class OllamaService {
         const modelName = m.name;
         const targetName = this.config.model;
         // Match either exact name or base name (e.g., llama3.2 matches llama3.2:3b)
-        return modelName === targetName || modelName.startsWith(targetName.split(':')[0]);
+        // @ts-ignore
+          return modelName === targetName || modelName.startsWith(targetName.split(':')[0]);
       });
 
       if (!hasModel) {
