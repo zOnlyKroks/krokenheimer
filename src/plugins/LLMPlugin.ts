@@ -16,14 +16,23 @@ export class LLMPlugin implements BotPlugin {
   private bot: ExtensibleBot | null = null;
   private isInitialized = false;
   private scheduledTask: cron.ScheduledTask | null = null;
+  private scanTask: cron.ScheduledTask | null = null;
   private config: MessageGenerationConfig;
   private lastGenerationTime = 0;
+  private scanIntervalMinutes = 2;
+  private lastScanTime = 0;
 
   commands: BotCommand[] = [
     {
       name: 'llmstats',
       description: 'Show LLM learning statistics',
       execute: this.showStats.bind(this),
+    },
+    {
+      name: 'llmscan',
+      description: 'Configure or trigger message scanning',
+      usage: 'llmscan [interval_minutes|now]',
+      execute: this.configureScan.bind(this),
     }
   ];
 
@@ -36,6 +45,9 @@ export class LLMPlugin implements BotPlugin {
       channelIds: process.env.LLM_CHANNEL_IDS?.split(',').filter(id => id.trim()),
       excludeChannelIds: process.env.LLM_EXCLUDE_CHANNEL_IDS?.split(',').filter(id => id.trim())
     };
+
+    // Load scan interval from env or default to 2 minutes
+    this.scanIntervalMinutes = parseInt(process.env.LLM_SCAN_INTERVAL_MINUTES || '2');
   }
 
   async initialize(client: Client, bot: ExtensibleBot): Promise<void> {
@@ -79,6 +91,9 @@ export class LLMPlugin implements BotPlugin {
     if (this.config.enabled) {
       this.startScheduledGeneration();
     }
+
+    // Start scheduled channel scanning
+    this.startChannelScanning();
   }
 
   private async collectMessage(message: Message): Promise<void> {
@@ -219,6 +234,128 @@ export class LLMPlugin implements BotPlugin {
     }
   }
 
+  private startChannelScanning(): void {
+    console.log('📅 Starting scheduled channel scanning...');
+    console.log(`   Scan interval: ${this.scanIntervalMinutes} minutes`);
+
+    // Run every minute and check if it's time to scan
+    this.scanTask = cron.schedule('* * * * *', async () => {
+      const now = Date.now();
+      const timeSinceLastScan = (now - this.lastScanTime) / 1000 / 60; // minutes
+
+      if (timeSinceLastScan >= this.scanIntervalMinutes) {
+        console.log('🔍 Starting scheduled channel scan...');
+        await this.scanAllChannels();
+        this.lastScanTime = now;
+      }
+    });
+  }
+
+  private async scanAllChannels(): Promise<void> {
+    if (!this.client || !this.isInitialized) {
+      return;
+    }
+
+    try {
+      const guilds = this.client.guilds.cache;
+      let totalScanned = 0;
+      let totalCollected = 0;
+
+      for (const [, guild] of guilds) {
+        const channels = guild.channels.cache.filter(ch => ch.isTextBased());
+
+        for (const [, channel] of channels) {
+          if (!channel.isTextBased()) continue;
+
+          // Check if channel should be excluded
+          if (this.config.excludeChannelIds?.includes(channel.id)) {
+            continue;
+          }
+
+          // Check if we should only scan specific channels
+          if (this.config.channelIds && this.config.channelIds.length > 0) {
+            if (!this.config.channelIds.includes(channel.id)) {
+              continue;
+            }
+          }
+
+          try {
+            totalScanned++;
+            const textChannel = channel as TextChannel;
+
+            // Fetch last 50 messages
+            const messages = await textChannel.messages.fetch({ limit: 50 });
+
+            for (const [, msg] of messages) {
+              // Skip if already stored (check by timestamp - only collect recent messages)
+              const oneHourAgo = Date.now() - (60 * 60 * 1000);
+              if (msg.createdTimestamp < oneHourAgo) {
+                continue;
+              }
+
+              if (!msg.author.bot && msg.content && msg.content.trim() !== '' && !msg.content.startsWith('!')) {
+                await this.collectMessage(msg);
+                totalCollected++;
+              }
+            }
+
+            // Small delay to avoid rate limits
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+          } catch (error) {
+            console.error(`Failed to scan channel ${channel.id}:`, error);
+          }
+        }
+      }
+
+      console.log(`✅ Channel scan complete: ${totalScanned} channels scanned, ${totalCollected} new messages collected`);
+
+    } catch (error) {
+      console.error('Failed to scan channels:', error);
+    }
+  }
+
+  private async configureScan(message: Message, args: string[]): Promise<void> {
+    if (args.length === 0) {
+      // Show current config
+      const statusText = `
+**🔍 Channel Scanning Configuration**
+
+• Scan interval: ${this.scanIntervalMinutes} minutes
+• Last scan: ${this.lastScanTime > 0 ? `${Math.round((Date.now() - this.lastScanTime) / 60000)} minutes ago` : 'Never'}
+
+**Usage:**
+\`!llmscan <minutes>\` - Set scan interval (1-60 minutes)
+\`!llmscan now\` - Trigger immediate scan
+      `;
+      await message.reply(statusText);
+      return;
+    }
+
+    const arg = args[0]?.toLowerCase() || '';
+
+    // Trigger immediate scan
+    if (arg === 'now') {
+      await message.reply('🔍 Starting channel scan...');
+      const startTime = Date.now();
+      await this.scanAllChannels();
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+      await message.reply(`✅ Scan completed in ${duration}s`);
+      return;
+    }
+
+    // Set scan interval
+    const newInterval = parseInt(arg);
+    if (isNaN(newInterval) || newInterval < 1 || newInterval > 60) {
+      await message.reply('❌ Invalid interval. Please specify a number between 1 and 60 minutes.');
+      return;
+    }
+
+    this.scanIntervalMinutes = newInterval;
+    await message.reply(`✅ Scan interval set to ${newInterval} minutes`);
+    console.log(`🔍 Scan interval updated to ${newInterval} minutes`);
+  }
+
   private async showStats(message: Message): Promise<void> {
     try {
       const totalMessages = messageStorageService.getTotalMessageCount();
@@ -251,6 +388,10 @@ ${channelList}
 • Status: ${this.config.enabled ? '✅ Enabled' : '❌ Disabled'}
 • Interval: ${this.config.minIntervalMinutes}-${this.config.maxIntervalMinutes} minutes
 • Last generation: ${this.lastGenerationTime > 0 ? `${Math.round((Date.now() - this.lastGenerationTime) / 60000)} minutes ago` : 'Never'}
+
+**Channel Scanning:**
+• Scan interval: ${this.scanIntervalMinutes} minutes
+• Last scan: ${this.lastScanTime > 0 ? `${Math.round((Date.now() - this.lastScanTime) / 60000)} minutes ago` : 'Never'}
       `;
 
       await message.reply(statsText);
@@ -263,6 +404,9 @@ ${channelList}
   async cleanup(): Promise<void> {
     if (this.scheduledTask) {
       this.scheduledTask.stop();
+    }
+    if (this.scanTask) {
+      this.scanTask.stop();
     }
     console.log('🤖 LLM Plugin cleaned up');
   }
