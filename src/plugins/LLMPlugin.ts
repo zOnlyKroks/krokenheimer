@@ -590,7 +590,8 @@ ${channelList}
       return;
     }
 
-    const command = args[0].toLowerCase();
+    // @ts-ignore
+      const command = args[0].toLowerCase();
 
     if (command === 'now') {
       const status = fineTuningService.getTrainingStatus();
