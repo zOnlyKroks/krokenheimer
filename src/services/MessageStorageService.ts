@@ -113,6 +113,17 @@ export class MessageStorageService {
     return stmt.all() as Array<{ channelId: string; channelName: string; count: number }>;
   }
 
+  getLastScannedTimestamp(channelId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT MAX(timestamp) as lastTimestamp
+      FROM messages
+      WHERE channelId = ?
+    `);
+
+    const result = stmt.get(channelId) as { lastTimestamp: number | null };
+    return result.lastTimestamp || 0;
+  }
+
   private rowToMessage(row: any): StoredMessage {
     return {
       id: row.id,

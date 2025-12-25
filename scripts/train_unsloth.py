@@ -123,6 +123,7 @@ def main():
         save_steps=50,
         save_total_limit=2,
         dataloader_num_workers=0,  # Important for CPU
+        dataloader_pin_memory=False,  # No GPU, don't pin memory
     )
 
     # Data collator

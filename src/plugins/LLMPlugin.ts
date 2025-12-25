@@ -391,15 +391,22 @@ export class LLMPlugin implements BotPlugin {
             totalScanned++;
             const textChannel = channel as TextChannel;
 
-            console.log(`  📝 Scanning #${textChannel.name}...`);
+            // Get last scanned timestamp for this channel
+            const lastScannedTimestamp = messageStorageService.getLastScannedTimestamp(textChannel.id);
+            const timeSinceLastScan = lastScannedTimestamp > 0
+              ? Math.round((Date.now() - lastScannedTimestamp) / 1000 / 60)
+              : 'never';
 
-            // Fetch ALL messages using pagination
+            console.log(`  📝 Scanning #${textChannel.name} (last scan: ${timeSinceLastScan} min ago)...`);
+
+            // Fetch messages AFTER last scanned timestamp
             let lastMessageId: string | undefined;
             let totalFetched = 0;
             let channelCollected = 0;
             let hasMore = true;
+            let reachedOldMessages = false;
 
-            while (hasMore) {
+            while (hasMore && !reachedOldMessages) {
               const options: { limit: number; before?: string } = { limit: 100 };
               if (lastMessageId) {
                 options.before = lastMessageId;
@@ -415,6 +422,12 @@ export class LLMPlugin implements BotPlugin {
 
               // Process messages in this batch
               for (const [, msg] of messages) {
+                // Stop if we've reached messages older than last scan
+                if (msg.createdTimestamp <= lastScannedTimestamp) {
+                  reachedOldMessages = true;
+                  break;
+                }
+
                 if (!msg.author.bot && msg.content && msg.content.trim() !== '' && !msg.content.startsWith('!')) {
                   await this.collectMessage(msg);
                   totalCollected++;
@@ -432,13 +445,22 @@ export class LLMPlugin implements BotPlugin {
 
               // Small delay between batches to avoid rate limiting
               await new Promise(resolve => setTimeout(resolve, 500));
-              console.log(`     More to go, current: ${totalFetched}`)
+
+              if (!reachedOldMessages) {
+                console.log(`     Progress: ${totalFetched} fetched, ${channelCollected} new`);
+              }
             }
 
-            console.log(`     Fetched ${totalFetched} total messages (${channelCollected} new, rest were duplicates or filtered)`);
+            if (reachedOldMessages) {
+              console.log(`     ⏭️  Stopped at previously scanned messages (${totalFetched} checked, ${channelCollected} new)`);
+            } else {
+              console.log(`     ✅ Reached channel start (${totalFetched} total, ${channelCollected} new)`);
+            }
 
             if (channelCollected > 0) {
               console.log(`     ✅ Collected ${channelCollected} new messages from #${textChannel.name}`);
+            } else {
+              console.log(`     ℹ️  No new messages in #${textChannel.name}`);
             }
 
           } catch (error) {
