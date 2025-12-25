@@ -42,6 +42,9 @@ RUN npm prune --production
 
 RUN mkdir -p /app/data /app/chroma_data /var/log/supervisor
 
+COPY wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh
+RUN chmod +x /usr/local/bin/wait-for-chromadb.sh
+
 COPY docker-supervisord.conf /etc/supervisor/supervisord.conf
 
 EXPOSE 11434 8000
