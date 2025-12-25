@@ -4,9 +4,10 @@ The LLM Plugin enables your Discord bot to automatically learn from server messa
 
 ## Quick Start (TL;DR)
 
+**macOS:**
 ```bash
 # 1. Install prerequisites
-brew install ollama screen  # macOS
+brew install ollama screen
 pip install chromadb
 
 # 2. Install dependencies
@@ -14,8 +15,26 @@ npm install
 
 # 3. Start everything
 ./start-all.sh
+```
 
-# To stop everything later
+**Linux:**
+```bash
+# 1. Install prerequisites
+curl -fsSL https://ollama.com/install.sh | sh
+sudo apt install screen pipx
+pipx install chromadb
+pipx ensurepath
+# Log out and back in
+
+# 2. Install dependencies
+npm install
+
+# 3. Start everything
+./start-all.sh
+```
+
+**To stop everything later:**
+```bash
 # Press Ctrl+C to stop bot, then:
 ./stop-llm-services.sh
 ```
@@ -84,14 +103,41 @@ ollama serve
 
 ChromaDB runs locally and requires Python.
 
+**macOS:**
 ```bash
 pip install chromadb
-chroma run --path ./chroma_data
 ```
 
-Or run in a separate terminal:
+**Linux (Debian/Ubuntu):**
+
+Due to externally-managed Python environments, use one of these methods:
+
+**Option 1 - Using pipx (recommended):**
 ```bash
-python -m chromadb.cli run --path ./chroma_data
+sudo apt install pipx
+pipx install chromadb
+pipx ensurepath
+# Log out and back in, or run: source ~/.bashrc
+```
+
+**Option 2 - Using virtual environment:**
+```bash
+python3 -m venv ~/.chromadb-venv
+~/.chromadb-venv/bin/pip install chromadb
+# Add to PATH or the start script will auto-detect it
+```
+
+**Option 3 - System packages (if available):**
+```bash
+# Check if available in repos (may not have latest version)
+apt search python3-chromadb
+```
+
+**Verify installation:**
+```bash
+chroma --version
+# or
+python3 -c "import chromadb; print('ChromaDB installed')"
 ```
 
 ## Installation
