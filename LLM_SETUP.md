@@ -2,6 +2,26 @@
 
 The LLM Plugin enables your Discord bot to automatically learn from server messages and generate contextual responses using a local LLM (no cloud/API costs).
 
+## Quick Start (TL;DR)
+
+```bash
+# 1. Install prerequisites
+brew install ollama screen  # macOS
+pip install chromadb
+
+# 2. Install dependencies
+npm install
+
+# 3. Start everything
+./start-all.sh
+
+# To stop everything later
+# Press Ctrl+C to stop bot, then:
+./stop-llm-services.sh
+```
+
+That's it! The bot will automatically learn from messages and start posting after collecting enough data.
+
 ## Features
 
 - **Automatic Message Collection**: Silently collects all non-command messages from your Discord server
@@ -12,6 +32,23 @@ The LLM Plugin enables your Discord bot to automatically learn from server messa
 - **Zero Manual Work**: Fully automated after initial setup
 
 ## Prerequisites
+
+### 0. Install screen (for background services)
+
+Optional but recommended for running services in the background:
+
+```bash
+# macOS
+brew install screen
+
+# Linux
+sudo apt install screen
+
+# Check installation
+screen --version
+```
+
+If you prefer not to use screen, you can run services manually in separate terminals (see Manual Start section).
 
 ### 1. Install Ollama
 
@@ -88,6 +125,33 @@ OLLAMA_MAX_TOKENS=200
 ```
 
 ## Running the Bot
+
+### Quick Start (Recommended)
+
+Use the provided scripts to manage all services:
+
+```bash
+# Start Ollama and ChromaDB in background screen sessions
+./start-llm-services.sh
+
+# Start the Discord bot
+npm run dev
+```
+
+**Managing background services:**
+```bash
+# View service logs
+screen -r ollama_server   # View Ollama logs
+screen -r chroma_server   # View ChromaDB logs
+# Press Ctrl+A, then D to detach
+
+# Stop all services
+./stop-llm-services.sh
+```
+
+### Manual Start (Alternative)
+
+If you prefer to run services manually:
 
 1. **Start Ollama** (in a separate terminal):
 ```bash
@@ -267,6 +331,17 @@ LLMPlugin (src/plugins/LLMPlugin.ts)
   ```bash
   rm -rf ./data/ ./chroma_data/
   ```
+
+## Script Reference
+
+| Script | Description |
+|--------|-------------|
+| `./start-all.sh` | Start all services (Ollama, ChromaDB, bot) in one command |
+| `./start-llm-services.sh` | Start only Ollama and ChromaDB in background screen sessions |
+| `./stop-llm-services.sh` | Stop all background services |
+| `screen -r ollama_server` | Attach to Ollama logs (Ctrl+A D to detach) |
+| `screen -r chroma_server` | Attach to ChromaDB logs (Ctrl+A D to detach) |
+| `screen -list` | List all running screen sessions |
 
 ## Tips
 
