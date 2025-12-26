@@ -148,27 +148,27 @@ export class FineTuningService {
       .catch(() => 'python3');
 
     return new Promise((resolve) => {
-      // Check if packages are installed (don't import unsloth as it needs GPU/CPU detection)
+      // Check if packages are installed for from-scratch training
       const checkProcess = spawn(pythonCmd, [
         '-c',
-        'import sys; import torch, transformers, trl, datasets; sys.exit(0)'
+        'import sys; import torch, transformers, tokenizers, datasets; sys.exit(0)'
       ]);
 
       checkProcess.on('close', (code) => {
         if (code === 0) {
-          console.log('✅ Python environment ready (torch, transformers, trl, datasets installed)');
+          console.log('✅ Python environment ready (torch, transformers, tokenizers, datasets installed)');
           resolve(true);
         } else {
           console.error('❌ Training dependencies not installed');
-          console.error('   Missing: torch, transformers, trl, or datasets');
-          console.error('   Run: ./scripts/setup_training.sh');
+          console.error('   Missing: torch, transformers, tokenizers, or datasets');
+          console.error('   Check Docker installation');
           resolve(false);
         }
       });
 
       checkProcess.on('error', () => {
         console.error('❌ Python not found');
-        console.error('   Run: ./scripts/setup_training.sh');
+        console.error('   Check Docker installation');
         resolve(false);
       });
     });
