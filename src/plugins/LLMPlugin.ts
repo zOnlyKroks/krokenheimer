@@ -378,7 +378,7 @@ export class LLMPlugin implements BotPlugin {
     throw lastError || new Error('Failed to fetch messages after retries');
   }
 
-  private async scanAllChannels(): Promise<void> {
+  private async scanAllChannels(forceFullScan: boolean = false): Promise<void> {
     if (!this.client || !this.isInitialized) {
       console.log('⚠️  Cannot scan: client not initialized');
       return;
@@ -423,13 +423,13 @@ export class LLMPlugin implements BotPlugin {
             totalScanned++;
             const textChannel = channel as TextChannel;
 
-            // Get last scanned timestamp for this channel
-            const lastScannedTimestamp = messageStorageService.getLastScannedTimestamp(textChannel.id);
+            // Get last scanned timestamp for this channel (or 0 if forcing full scan)
+            const lastScannedTimestamp = forceFullScan ? 0 : messageStorageService.getLastScannedTimestamp(textChannel.id);
             const timeSinceLastScan = lastScannedTimestamp > 0
               ? `${Math.round((Date.now() - lastScannedTimestamp) / 1000 / 60)} min`
               : 'never';
 
-            console.log(`  📝 Scanning #${textChannel.name} (last: ${timeSinceLastScan} ago)...`);
+            console.log(`  📝 Scanning #${textChannel.name} (last: ${timeSinceLastScan} ago)${forceFullScan ? ' [FULL SCAN]' : ''}...`);
 
             // Fetch messages AFTER last scanned timestamp
             let lastMessageId: string | undefined;
@@ -712,15 +712,26 @@ ${channelList}
       // Clear the vector store
       await vectorStoreService.clear();
 
-      // Rescan all messages to rebuild with TF-IDF embeddings
+      // Get all messages from database to re-embed
       const totalMessages = messageStorageService.getTotalMessageCount();
-      await message.reply(`✅ Vector store cleared! Rescanning ${totalMessages} messages...`);
+      await message.reply(`✅ Vector store cleared! Re-embedding ${totalMessages} messages from database...`);
 
-      // Trigger a full rescan
-      await this.scanAllChannels();
+      // Get all active channels and re-embed their messages
+      const channels = messageStorageService.getActiveChannels();
+      let embeddedCount = 0;
+
+      for (const channel of channels) {
+        const messages = messageStorageService.getMessagesByChannel(channel.channelId, 100000);
+        console.log(`  📝 Re-embedding ${messages.length} messages from #${channel.channelName}...`);
+
+        for (const msg of messages) {
+          await vectorStoreService.storeMessage(msg);
+          embeddedCount++;
+        }
+      }
 
       const vectorCount = await vectorStoreService.getCollectionCount();
-      await message.reply(`✅ Vector store rebuilt with TF-IDF embeddings!\n📊 Stored ${vectorCount} message embeddings.`);
+      await message.reply(`✅ Vector store rebuilt with TF-IDF embeddings!\n📊 Stored ${vectorCount} message embeddings (${embeddedCount} processed).`);
     } catch (error) {
       console.error('Failed to clear vector store:', error);
       await message.reply('❌ Failed to clear vector store. Check console for details.');
