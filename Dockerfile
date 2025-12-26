@@ -32,22 +32,25 @@ RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import su
     echo 'exec /opt/chromadb-venv/bin/chroma run --host 0.0.0.0 --port 8000 --path "$1"' >> /usr/local/bin/run-chromadb && \
     chmod +x /usr/local/bin/run-chromadb
 
-# Install CPU-compatible training environment (no Unsloth - requires GPU)
-# Using standard HuggingFace Transformers + PEFT for LoRA training
-# Install CPU-compatible training environment (no Unsloth - requires GPU)
-# Using standard HuggingFace Transformers + PEFT for LoRA training
+# Create /app directory BEFORE trying to symlink to it
+RUN mkdir -p /app
+
+# Install CPU-compatible training environment with VERSION PINNING
 RUN python3 -m venv /opt/training-venv && \
     /opt/training-venv/bin/pip install --upgrade pip && \
     /opt/training-venv/bin/pip install --no-cache-dir \
-    torch --index-url https://download.pytorch.org/whl/cpu && \
+    torch==2.1.0 \
+    torchvision==0.16.0 \
+    torchaudio==2.1.0 \
+    --index-url https://download.pytorch.org/whl/cpu && \
     /opt/training-venv/bin/pip install --no-cache-dir \
-    torchvision==0.15.2 && \
+    "numpy<2" && \
     /opt/training-venv/bin/pip install --no-cache-dir \
-    transformers \
-    trl \
-    datasets \
-    accelerate \
-    peft && \
+    transformers==4.36.0 \
+    trl==0.7.4 \
+    datasets==2.16.0 \
+    accelerate==0.25.0 \
+    peft==0.7.0 && \
     /opt/training-venv/bin/pip install --no-cache-dir \
     scipy \
     sentencepiece \
@@ -55,15 +58,20 @@ RUN python3 -m venv /opt/training-venv && \
     ninja \
     packaging
 
-# Verify installation works
-RUN /opt/training-venv/bin/python -c "import torch; print(f'Torch version: {torch.__version__}')" && \
-    /opt/training-venv/bin/python -c "import transformers; print(f'Transformers version: {transformers.__version__}')" && \
-    /opt/training-venv/bin/python -c "import peft; print(f'PEFT version: {peft.__version__}')" && \
-    echo "✅ CPU training environment ready" \
+# Verify installation works (with better error reporting)
+RUN echo "Testing PyTorch installation..." && \
+    /opt/training-venv/bin/python -c "import torch; print(f'✓ PyTorch {torch.__version__}'); print(f'  CUDA available: {torch.cuda.is_available()}')" && \
+    echo "Testing NumPy installation..." && \
+    /opt/training-venv/bin/python -c "import numpy; print(f'✓ NumPy {numpy.__version__}')" && \
+    echo "Testing Transformers installation..." && \
+    /opt/training-venv/bin/python -c "import transformers; print(f'✓ Transformers {transformers.__version__}')" && \
+    echo "Testing PEFT installation..." && \
+    /opt/training-venv/bin/python -c "import peft; print(f'✓ PEFT {peft.__version__}')" && \
+    echo "✅ CPU training environment ready"
 
 WORKDIR /app
 
-# Symlink training venv to app directory for bot access
+# NOW this will work since /app exists
 RUN ln -s /opt/training-venv /app/venv
 
 COPY package*.json ./
