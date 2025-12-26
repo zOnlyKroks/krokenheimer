@@ -705,6 +705,28 @@ ${channelList}
     return emojis[phase] || '❓';
   }
 
+  private async clearVectorStore(message: Message, args: string[]): Promise<void> {
+    await message.reply('🗑️ Clearing vector store and rebuilding with new embeddings...');
+
+    try {
+      // Clear the vector store
+      await vectorStoreService.clear();
+
+      // Rescan all messages to rebuild with TF-IDF embeddings
+      const totalMessages = messageStorageService.getTotalMessageCount();
+      await message.reply(`✅ Vector store cleared! Rescanning ${totalMessages} messages...`);
+
+      // Trigger a full rescan
+      await this.scanAllChannels();
+
+      const vectorCount = await vectorStoreService.getCollectionCount();
+      await message.reply(`✅ Vector store rebuilt with TF-IDF embeddings!\n📊 Stored ${vectorCount} message embeddings.`);
+    } catch (error) {
+      console.error('Failed to clear vector store:', error);
+      await message.reply('❌ Failed to clear vector store. Check console for details.');
+    }
+  }
+
   async cleanup(): Promise<void> {
     if (this.scheduledTask) {
       this.scheduledTask.stop();
