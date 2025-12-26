@@ -176,53 +176,51 @@ export class FineTuningService {
   }
 
   async exportTrainingData(): Promise<string> {
-    console.log('📝 Exporting training data...');
+    console.log('📝 Exporting training data from database...');
 
-    // Get all messages from the database
-    const allChannels = messageStorageService.getActiveChannels();
+    // Get all messages from database in a single efficient query
+    const allMessages = messageStorageService.getAllMessages();
+    console.log(`📦 Loaded ${allMessages.length} messages from database`);
+
     const trainingData: Array<{ messages: Array<{ role: string; content: string }> }> = [];
 
-    for (const channel of allChannels) {
-      const messages = messageStorageService.getMessagesByChannel(channel.channelId, 10000);
+    // Group messages into conversation windows
+    for (let i = 0; i < allMessages.length - 5; i += 3) {
+      const window = allMessages.slice(i, i + 10);
 
-      // Group messages into conversation windows
-      for (let i = 0; i < messages.length - 5; i += 3) {
-        const window = messages.slice(i, i + 10);
+      // Skip if window is too small
+      if (window.length < 5) continue;
 
-        // Skip if window is too small
-        if (window.length < 5) continue;
+      // Format as conversation: context -> response
+      const contextMessages = window.slice(0, -1).map(m =>
+        `${m.authorName}: ${m.content}`
+      ).join('\n');
 
-        // Format as conversation: context -> response
-        const contextMessages = window.slice(0, -1).map(m =>
-          `${m.authorName}: ${m.content}`
-        ).join('\n');
+      const response = window[window.length - 1];
 
-        const response = window[window.length - 1];
-
-        if(!response) {
-            return "Bröken";
-        }
-
-        trainingData.push({
-          messages: [
-            {
-              role: 'system',
-              content: `You are a member of this Discord server who knows everything that has been said in all channels. You have perfect memory of every conversation. Match the tone and style of the server.`
-            },
-            {
-              role: 'user',
-              content: `Continue this conversation naturally:\n\n${contextMessages}`
-            },
-            {
-              role: 'assistant',
-              content: response.content
-            }
-          ]
-        });
+      if(!response) {
+          return "Bröken";
       }
+
+      trainingData.push({
+        messages: [
+          {
+            role: 'system',
+            content: `You are a member of this Discord server who knows everything that has been said in all channels. You have perfect memory of every conversation. Match the tone and style of the server.`
+          },
+          {
+            role: 'user',
+            content: `Continue this conversation naturally:\n\n${contextMessages}`
+          },
+          {
+            role: 'assistant',
+            content: response.content
+          }
+        ]
+      });
     }
 
-    console.log(`📊 Exported ${trainingData.length} training examples`);
+    console.log(`📊 Created ${trainingData.length} training examples`);
 
     // Save as JSONL format (required by Ollama/most fine-tuning tools)
     const outputPath = './data/training_data.jsonl';

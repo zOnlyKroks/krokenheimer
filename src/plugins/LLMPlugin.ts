@@ -656,12 +656,6 @@ ${channelList}
 `;
       }
 
-      statusText += `
-**Usage:**
-\`!llmtrain now\` - Start training immediately
-\`!llmtrain status\` - Show this status
-      `;
-
       await message.reply(statusText);
       return;
     }

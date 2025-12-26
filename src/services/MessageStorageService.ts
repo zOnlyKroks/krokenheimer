@@ -124,6 +124,16 @@ export class MessageStorageService {
     return result.lastTimestamp || 0;
   }
 
+  getAllMessages(limit?: number): StoredMessage[] {
+    const sql = limit
+      ? `SELECT * FROM messages ORDER BY timestamp ASC LIMIT ?`
+      : `SELECT * FROM messages ORDER BY timestamp ASC`;
+
+    const stmt = this.db.prepare(sql);
+    const rows = limit ? stmt.all(limit) as any[] : stmt.all() as any[];
+    return rows.map(row => this.rowToMessage(row));
+  }
+
   private rowToMessage(row: any): StoredMessage {
     return {
       id: row.id,
