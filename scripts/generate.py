@@ -54,14 +54,30 @@ def main():
         model = GPT2LMHeadModel.from_pretrained(args.model_path)
         model.eval()
 
+        # Get model's max position embeddings
+        max_position_embeddings = model.config.n_positions  # Usually 512
+
         # Encode prompt
         input_ids = tokenizer.encode(args.prompt, return_tensors='pt')
+
+        # Check if prompt is too long - truncate if needed
+        if input_ids.shape[1] > max_position_embeddings - args.max_length:
+            # Leave room for generation
+            max_prompt_length = max_position_embeddings - args.max_length
+            print(f"Warning: Truncating prompt from {input_ids.shape[1]} to {max_prompt_length} tokens", file=sys.stderr)
+            input_ids = input_ids[:, -max_prompt_length:]
+
+        # Calculate safe max_length
+        safe_max_length = min(
+            input_ids.shape[1] + args.max_length,
+            max_position_embeddings
+        )
 
         # Generate
         with torch.no_grad():
             output_ids = model.generate(
                 input_ids,
-                max_length=input_ids.shape[1] + args.max_length,
+                max_length=safe_max_length,
                 temperature=args.temperature,
                 top_p=args.top_p,
                 top_k=args.top_k,

@@ -23,26 +23,31 @@ export class ModelInferenceService {
   }
 
   async generateMessage(context: StoredMessage[], channelName: string, channelId?: string): Promise<string> {
-    // Get relevant historical messages using vector search
+    // Get relevant historical messages using vector search (limited to save context window)
     let historicalContext: StoredMessage[] = [];
     if (context.length > 0) {
       const vectorStoreService = (await import('./VectorStoreService.js')).default;
-      const recentTopics = context.slice(-5).map(m => m.content).join(' ');
-      historicalContext = await vectorStoreService.findSimilarMessages(recentTopics, undefined, 20);
+      const recentTopics = context.slice(-3).map(m => m.content).join(' ');
+      historicalContext = await vectorStoreService.findSimilarMessages(recentTopics, undefined, 5);
 
       const recentIds = new Set(context.map(m => m.id));
       historicalContext = historicalContext.filter(m => !recentIds.has(m.id));
     }
 
+    // Limit recent context to last 10 messages to stay within 512 token limit
+    const limitedContext = context.slice(-10);
+
     // Build prompt
-    const prompt = this.buildContextPrompt(context, channelName, historicalContext);
+    const prompt = this.buildContextPrompt(limitedContext, channelName, historicalContext);
 
     // Generate using trained model
     return await this.generate(prompt);
   }
 
   async generateMentionResponse(context: StoredMessage[], messageContent: string, authorName: string): Promise<string> {
-    const prompt = this.buildMentionPrompt(context, messageContent, authorName);
+    // Limit context for mentions too
+    const limitedContext = context.slice(-8);
+    const prompt = this.buildMentionPrompt(limitedContext, messageContent, authorName);
     return await this.generate(prompt);
   }
 
@@ -93,15 +98,19 @@ export class ModelInferenceService {
     let prompt = '<|system|>\nYou are a member of this Discord server. Match the tone and style of the conversations.';
 
     if (historicalContext.length > 0) {
-      prompt += '\n\nRelevant past conversations:\n';
-      historicalContext.slice(0, 10).forEach(msg => {
-        prompt += `${msg.authorName}: ${msg.content}\n`;
+      prompt += '\n\nRelevant past:\n';
+      historicalContext.slice(0, 5).forEach(msg => {
+        // Truncate long messages to save tokens
+        const content = msg.content.length > 100 ? msg.content.substring(0, 100) + '...' : msg.content;
+        prompt += `${msg.authorName}: ${content}\n`;
       });
     }
 
-    prompt += `\n\nCurrent conversation in #${channelName}:\n`;
+    prompt += `\n\nCurrent in #${channelName}:\n`;
     context.forEach(msg => {
-      prompt += `${msg.authorName}: ${msg.content}\n`;
+      // Truncate long messages to save tokens
+      const content = msg.content.length > 150 ? msg.content.substring(0, 150) + '...' : msg.content;
+      prompt += `${msg.authorName}: ${content}\n`;
     });
 
     prompt += '\n<|assistant|>\n';
@@ -113,12 +122,17 @@ export class ModelInferenceService {
 
     prompt += '\n\n<|user|>\n';
     if (context.length > 0) {
-      prompt += 'Recent conversation:\n';
+      prompt += 'Recent:\n';
       context.forEach(msg => {
-        prompt += `${msg.authorName}: ${msg.content}\n`;
+        // Truncate long messages to save tokens
+        const content = msg.content.length > 150 ? msg.content.substring(0, 150) + '...' : msg.content;
+        prompt += `${msg.authorName}: ${content}\n`;
       });
     }
-    prompt += `\n${authorName}: ${messageContent}`;
+
+    // Truncate the mention message too if needed
+    const truncatedContent = messageContent.length > 200 ? messageContent.substring(0, 200) + '...' : messageContent;
+    prompt += `\n${authorName}: ${truncatedContent}`;
 
     prompt += '\n\n<|assistant|>\n';
     return prompt;
