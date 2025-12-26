@@ -41,6 +41,11 @@ export class LLMPlugin implements BotPlugin {
       description: 'Manage model training',
       usage: 'llmtrain [now|status]',
       execute: this.manageTrain.bind(this),
+    },
+    {
+      name: 'llmclear',
+      description: 'Clear vector store (use after switching embedding methods)',
+      execute: this.clearVectorStore.bind(this),
     }
   ];
 

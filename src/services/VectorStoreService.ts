@@ -13,11 +13,15 @@ export class VectorStoreService {
 
   async initialize(): Promise<void> {
     try {
+      // Get or create collection with TF-IDF dimensions
       this.collection = await this.client.getOrCreateCollection({
         name: this.collectionName,
-        metadata: { description: 'Discord message embeddings' }
+        metadata: {
+          description: 'Discord message embeddings (TF-IDF, 384 dimensions)',
+          embeddingDimension: 384
+        }
       });
-      console.log('VectorStore initialized successfully');
+      console.log('VectorStore initialized successfully (TF-IDF embeddings, 384 dimensions)');
     } catch (error) {
       console.error('Failed to initialize VectorStore:', error);
       throw error;
