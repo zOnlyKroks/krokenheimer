@@ -34,20 +34,32 @@ RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import su
 
 # Install CPU-compatible training environment (no Unsloth - requires GPU)
 # Using standard HuggingFace Transformers + PEFT for LoRA training
+# Install CPU-compatible training environment (no Unsloth - requires GPU)
+# Using standard HuggingFace Transformers + PEFT for LoRA training
 RUN python3 -m venv /opt/training-venv && \
     /opt/training-venv/bin/pip install --upgrade pip && \
     /opt/training-venv/bin/pip install --no-cache-dir \
     torch --index-url https://download.pytorch.org/whl/cpu && \
     /opt/training-venv/bin/pip install --no-cache-dir \
+    torchvision==0.15.2 && \
+    /opt/training-venv/bin/pip install --no-cache-dir \
     transformers \
     trl \
     datasets \
     accelerate \
-    torchvision \
-    peft
+    peft && \
+    /opt/training-venv/bin/pip install --no-cache-dir \
+    scipy \
+    sentencepiece \
+    protobuf \
+    ninja \
+    packaging
 
-# Verify installation
-RUN /opt/training-venv/bin/python -c "import torch, transformers, trl, peft; print('✅ CPU training environment ready')"
+# Verify installation works
+RUN /opt/training-venv/bin/python -c "import torch; print(f'Torch version: {torch.__version__}')" && \
+    /opt/training-venv/bin/python -c "import transformers; print(f'Transformers version: {transformers.__version__}')" && \
+    /opt/training-venv/bin/python -c "import peft; print(f'PEFT version: {peft.__version__}')" && \
+    echo "✅ CPU training environment ready" \
 
 WORKDIR /app
 
