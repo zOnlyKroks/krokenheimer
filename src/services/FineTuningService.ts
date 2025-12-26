@@ -16,7 +16,7 @@ export class FineTuningService {
     currentStep: 0,
     totalSteps: 0,
     currentEpoch: 0,
-    totalEpochs: 3,
+    totalEpochs: 1,  // Updated to match train_text_lora.py
     currentLoss: 0,
     startTime: 0,
     phase: 'idle' as 'idle' | 'preparing' | 'training' | 'saving' | 'importing'
@@ -329,7 +329,7 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
                 currentStep: 0,
                 totalSteps: 0,
                 currentEpoch: 0,
-                totalEpochs: 3,
+                totalEpochs: 1,  // Updated to match train_text_lora.py
                 currentLoss: 0,
                 startTime: Date.now(),
                 phase: 'preparing'
@@ -423,8 +423,8 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
             if (match) {
                 // @ts-ignore
                 const samples = parseInt(match[1]);
-                // batch_size=1, gradient_accumulation=8, epochs=3
-                this.trainingProgress.totalSteps = Math.ceil((samples / 8) * 3);
+                // batch_size=1, gradient_accumulation=4, epochs=1 (updated to match train_text_lora.py)
+                this.trainingProgress.totalSteps = Math.ceil((samples / 4) * 1);
             }
         } else if (text.includes('Saving model')) {
             this.trainingProgress.phase = 'saving';

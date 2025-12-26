@@ -20,6 +20,10 @@ from typing import Dict, List
 from pathlib import Path
 import numpy as np
 import time
+import warnings
+
+# Suppress specific tokenizer warnings that are informational only
+warnings.filterwarnings('ignore', message='.*fast tokenizer.*')
 
 # ==================== XEON CPU OPTIMIZATION ====================
 def setup_xeon_environment():
@@ -123,11 +127,18 @@ def main():
     print("📥 Loading model and tokenizer...")
 
     try:
-        tokenizer = AutoTokenizer.from_pretrained(args.base_model)
+        tokenizer = AutoTokenizer.from_pretrained(
+            args.base_model,
+            use_fast=True,  # Explicitly use fast tokenizer
+            padding_side='right'  # Set padding side
+        )
 
         # Set padding token if not present
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
+
+        # Configure tokenizer for optimal performance
+        tokenizer.model_max_length = 256  # Match max_length in tokenize_function
 
         model = AutoModelForCausalLM.from_pretrained(
             args.base_model,

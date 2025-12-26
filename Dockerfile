@@ -57,7 +57,8 @@ RUN python3 -m venv /opt/training-venv && \
     protobuf \
     ninja \
     matplotlib \
-    packaging
+    packaging \
+    psutil
 
 # Verify installation works (with better error reporting)
 RUN echo "Testing PyTorch installation..." && \
@@ -68,6 +69,8 @@ RUN echo "Testing PyTorch installation..." && \
     /opt/training-venv/bin/python -c "import transformers; print(f'✓ Transformers {transformers.__version__}')" && \
     echo "Testing PEFT installation..." && \
     /opt/training-venv/bin/python -c "import peft; print(f'✓ PEFT {peft.__version__}')" && \
+    echo "Testing psutil installation..." && \
+    /opt/training-venv/bin/python -c "import psutil; print(f'✓ psutil {psutil.__version__}')" && \
     echo "✅ CPU training environment ready"
 
 WORKDIR /app
