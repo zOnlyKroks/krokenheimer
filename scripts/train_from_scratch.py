@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-From-Scratch Training for Discord Bot
-Trains a small GPT-2 model from scratch using ONLY your Discord messages.
+100% From-Scratch Training for Discord Bot
+ZERO pre-trained components - everything learned from YOUR Discord messages
+
+What gets trained from scratch:
+1. Custom tokenizer (vocabulary learned from YOUR messages)
+2. Model weights (100% random initialization, GPT-2 architecture)
+3. No pre-trained knowledge - learns ONLY your server's language
 
 WARNING: This approach requires 50k-100k+ messages for coherent output.
 Current message count will produce repetitive/incoherent text initially.
@@ -49,7 +54,8 @@ def setup_cpu_environment():
     torch.set_num_interop_threads(1)
 
     print("=" * 70)
-    print("CPU Training from Scratch - Discord Bot")
+    print("100% FROM-SCRATCH Training - Discord Bot")
+    print("ZERO Pre-Trained Components - Pure Discord Learning")
     print("=" * 70)
     print(f"PyTorch threads: {torch.get_num_threads()}")
     print(f"Device: CPU")
@@ -112,53 +118,105 @@ def main():
     try:
         from transformers import (
             GPT2LMHeadModel,
-            GPT2Tokenizer,
             GPT2Config,
+            PreTrainedTokenizerFast,
             TrainingArguments,
             Trainer,
             DataCollatorForLanguageModeling
         )
+        from tokenizers import Tokenizer, models, pre_tokenizers, decoders, trainers, processors
         from datasets import Dataset
     except ImportError as e:
         print(f"❌ Missing dependencies: {e}")
-        print("   Install with: pip install transformers datasets")
+        print("   Install with: pip install transformers datasets tokenizers")
         sys.exit(1)
 
-    # Load or create model
-    print("📥 Initializing model and tokenizer...")
+    # Load or create tokenizer
+    print("📥 Building custom tokenizer from YOUR Discord messages...")
+
+    tokenizer_path = f"./data/models/{args.output_name}/tokenizer.json"
 
     try:
-        tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+        if args.resume and os.path.exists(tokenizer_path):
+            # Load existing custom tokenizer
+            print(f"📂 Loading custom tokenizer from {tokenizer_path}")
+            tokenizer_obj = Tokenizer.from_file(tokenizer_path)
+            tokenizer = PreTrainedTokenizerFast(
+                tokenizer_object=tokenizer_obj,
+                bos_token='<|endoftext|>',
+                eos_token='<|endoftext|>',
+                unk_token='<|endoftext|>',
+                pad_token='<|pad|>'
+            )
+        else:
+            # Train NEW tokenizer on YOUR Discord data
+            print("🆕 Training NEW tokenizer from YOUR messages (no pre-trained vocab)")
 
-        # Add special tokens for our Discord format
-        special_tokens = {
-            'additional_special_tokens': ['<|system|>', '<|user|>', '<|assistant|>'],
-            'pad_token': '<|pad|>'
-        }
-        tokenizer.add_special_tokens(special_tokens)
+            # Create BPE tokenizer
+            tokenizer_obj = Tokenizer(models.BPE(unk_token='<|endoftext|>'))
+            tokenizer_obj.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+            tokenizer_obj.decoder = decoders.ByteLevel()
+
+            # Prepare special tokens
+            special_tokens = ['<|endoftext|>', '<|pad|>', '<|system|>', '<|user|>', '<|assistant|>']
+
+            # Train on YOUR data
+            trainer = trainers.BpeTrainer(
+                vocab_size=8000,  # Small vocab for limited data
+                special_tokens=special_tokens,
+                show_progress=True,
+                min_frequency=2
+            )
+
+            # Load training data to build vocabulary
+            raw_data = load_training_data(args.training_data)
+            texts = [format_conversation(ex) for ex in raw_data]
+
+            print(f"   Training tokenizer on {len(texts)} Discord conversations...")
+            tokenizer_obj.train_from_iterator(texts, trainer=trainer)
+
+            # Save the custom tokenizer
+            os.makedirs(f"./data/models/{args.output_name}", exist_ok=True)
+            tokenizer_obj.save(tokenizer_path)
+            print(f"✓ Custom tokenizer saved to {tokenizer_path}")
+
+            # Wrap in HuggingFace tokenizer
+            tokenizer = PreTrainedTokenizerFast(
+                tokenizer_object=tokenizer_obj,
+                bos_token='<|endoftext|>',
+                eos_token='<|endoftext|>',
+                unk_token='<|endoftext|>',
+                pad_token='<|pad|>'
+            )
+
+        print(f"✓ Tokenizer vocabulary size: {len(tokenizer)} (learned from YOUR messages)")
+        print(f"✓ Special tokens: {tokenizer.all_special_tokens}")
 
         if args.resume:
             # Resume from checkpoint
             print(f"📂 Loading model from checkpoint: {args.resume}")
             model = GPT2LMHeadModel.from_pretrained(args.resume)
+            # Ensure model uses correct vocab size
+            if model.config.vocab_size != len(tokenizer):
+                print(f"⚠️  Resizing model embeddings: {model.config.vocab_size} -> {len(tokenizer)}")
+                model.resize_token_embeddings(len(tokenizer))
         else:
-            # Create NEW model with GPT-2 Small architecture (124M params)
-            print("🆕 Creating NEW GPT-2 Small model (124M parameters)")
+            # Create NEW model with GPT-2 Small architecture
+            # Using YOUR custom vocabulary (no pre-trained weights!)
+            print("🆕 Creating NEW model with YOUR vocabulary (100% from scratch)")
             config = GPT2Config(
-                vocab_size=len(tokenizer),
-                n_positions=512,  # Context length
-                n_embd=768,       # Embedding size
-                n_layer=12,       # Number of layers
-                n_head=12,        # Attention heads
+                vocab_size=len(tokenizer),  # YOUR custom vocabulary size
+                n_positions=512,            # Context length
+                n_embd=768,                 # Embedding size
+                n_layer=12,                 # Number of layers (GPT-2 Small architecture)
+                n_head=12,                  # Attention heads
                 resid_pdrop=0.1,
                 embd_pdrop=0.1,
                 attn_pdrop=0.1,
             )
             model = GPT2LMHeadModel(config)
             print("✓ Model initialized with RANDOM weights (from scratch)")
-
-        # Resize token embeddings for new special tokens
-        model.resize_token_embeddings(len(tokenizer))
+            print(f"✓ Using YOUR vocabulary: {len(tokenizer)} tokens learned from Discord")
 
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -171,7 +229,10 @@ def main():
 
     # Load and prepare training data
     print("📊 Preparing training data...")
-    raw_data = load_training_data(args.training_data)
+
+    # Load data if not already loaded (for tokenizer training)
+    if 'raw_data' not in locals():
+        raw_data = load_training_data(args.training_data)
 
     # Format conversations
     formatted_texts = [format_conversation(ex) for ex in raw_data]
@@ -273,6 +334,11 @@ def main():
         print(f"Samples/second: {metrics['samples_per_second']:.2f}")
         print(f"Final loss: {metrics['train_loss']:.4f}")
         print(f"Model saved to: {output_dir}")
+        print("=" * 70)
+        print("\n🎉 100% FROM SCRATCH:")
+        print(f"   ✓ Custom vocabulary: {len(tokenizer)} tokens from YOUR Discord")
+        print(f"   ✓ Model weights: 100% trained on YOUR messages")
+        print(f"   ✓ Zero pre-trained knowledge - pure Discord learning")
         print("=" * 70)
 
         # Save metrics

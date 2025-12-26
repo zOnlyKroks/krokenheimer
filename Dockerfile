@@ -47,11 +47,11 @@ RUN python3 -m venv /opt/training-venv && \
     "numpy<2" && \
     /opt/training-venv/bin/pip install --no-cache-dir \
     transformers==4.36.0 \
+    tokenizers==0.15.0 \
     datasets==2.16.0 \
     accelerate==0.25.0 && \
     /opt/training-venv/bin/pip install --no-cache-dir \
     scipy \
-    sentencepiece \
     protobuf \
     ninja \
     matplotlib \
@@ -65,9 +65,11 @@ RUN echo "Testing PyTorch installation..." && \
     /opt/training-venv/bin/python -c "import numpy; print(f'✓ NumPy {numpy.__version__}')" && \
     echo "Testing Transformers installation..." && \
     /opt/training-venv/bin/python -c "import transformers; print(f'✓ Transformers {transformers.__version__}')" && \
+    echo "Testing Tokenizers installation..." && \
+    /opt/training-venv/bin/python -c "import tokenizers; print(f'✓ Tokenizers {tokenizers.__version__}')" && \
     echo "Testing psutil installation..." && \
     /opt/training-venv/bin/python -c "import psutil; print(f'✓ psutil {psutil.__version__}')" && \
-    echo "✅ From-scratch training environment ready"
+    echo "✅ 100% from-scratch training environment ready (custom tokenizer + random weights)"
 
 WORKDIR /app
 
