@@ -139,19 +139,49 @@ export class ModelInferenceService {
   }
 
   private cleanResponse(text: string): string {
-    // Remove any remaining special tokens
-    text = text.replace(/<\|[^|]+\|>/g, '');
+    // Aggressive special token removal (all possible variations)
+    text = text.replace(/<\|assistant\|>/gi, '');
+    text = text.replace(/<\|system\|>/gi, '');
+    text = text.replace(/<\|user\|>/gi, '');
+    text = text.replace(/<\|pad\|>/gi, '');
+    text = text.replace(/<\|endoftext\|>/gi, '');
 
-    // Remove markdown
+    // Remove partial tokens (missing opening <)
+    text = text.replace(/\|assistant\|>/gi, '');
+    text = text.replace(/\|system\|>/gi, '');
+    text = text.replace(/\|user\|>/gi, '');
+    text = text.replace(/\|pad\|>/gi, '');
+    text = text.replace(/\|endoftext\|>/gi, '');
+
+    // Remove tokens missing closing >
+    text = text.replace(/<\|assistant\|/gi, '');
+    text = text.replace(/<\|system\|/gi, '');
+    text = text.replace(/<\|user\|/gi, '');
+    text = text.replace(/<\|pad\|/gi, '');
+    text = text.replace(/<\|endoftext\|/gi, '');
+
+    // Catch any remaining angle bracket patterns
+    text = text.replace(/<\|[^>|]+\|>/g, '');
+    text = text.replace(/\|[^>|]+\|>/g, '');
+
+    // Remove markdown code blocks
     text = text.replace(/```[\s\S]*?```/g, '');
     text = text.replace(/`[^`]+`/g, '');
 
     // Remove AI prefixes
-    text = text.replace(/^(Here's a message|Here is a message|Message:|Response:)\s*/i, '');
+    text = text.replace(/^(Here's a message|Here is a message|Message:|Response:|Assistant:)\s*/i, '');
 
-    // Take first line
+    // Remove leading/trailing whitespace and newlines
+    text = text.trim();
+
+    // Take first non-empty line if multi-line
     const lines = text.split('\n').filter(l => l.trim().length > 0);
-    text = lines[0] || text;
+    if (lines.length > 0) {
+      text = lines[0];
+    }
+
+    // Final pass: remove any remaining fragments
+    text = text.replace(/[<|]+(assistant|system|user|pad|endoftext)[|>]+/gi, '');
 
     // Limit length
     if (text.length > 500) {

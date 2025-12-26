@@ -90,20 +90,58 @@ def main():
         # Decode output
         generated_text = tokenizer.decode(output_ids[0], skip_special_tokens=False)
 
-        # Extract only the generated part (after prompt)
-        prompt_length = len(args.prompt)
-        generated_part = generated_text[prompt_length:].strip()
+        # Find where assistant's response starts (after the <|assistant|> token)
+        assistant_marker = '<|assistant|>'
+        if assistant_marker in generated_text:
+            # Get text after the last <|assistant|> marker
+            parts = generated_text.split(assistant_marker)
+            generated_part = parts[-1].strip()
+        else:
+            # Fallback: extract after prompt
+            prompt_length = len(args.prompt)
+            generated_part = generated_text[prompt_length:].strip()
 
-        # Stop at endoftext token
-        if '<|endoftext|>' in generated_part:
-            generated_part = generated_part.split('<|endoftext|>')[0].strip()
+        # Import regex for cleaning
+        import re
 
-        # Stop at special tokens
-        for token in ['<|system|>', '<|user|>', '<|assistant|>']:
-            if token in generated_part:
-                generated_part = generated_part.split(token)[0].strip()
+        # Remove all special tokens (complete tokens)
+        special_tokens = ['<|endoftext|>', '<|assistant|>', '<|system|>', '<|user|>', '<|pad|>']
+        for token in special_tokens:
+            generated_part = generated_part.replace(token, '')
 
-        print(generated_part)
+        # Remove partial tokens (missing opening <)
+        partial_tokens = ['|endoftext|>', '|assistant|>', '|system|>', '|user|>', '|pad|>']
+        for token in partial_tokens:
+            generated_part = generated_part.replace(token, '')
+
+        # Remove tokens missing closing >
+        partial_tokens_2 = ['<|endoftext|', '<|assistant|', '<|system|', '<|user|', '<|pad|']
+        for token in partial_tokens_2:
+            generated_part = generated_part.replace(token, '')
+
+        # Remove any remaining angle bracket token patterns (case insensitive)
+        generated_part = re.sub(r'<\|[^>|]+\|>', '', generated_part, flags=re.IGNORECASE)
+        generated_part = re.sub(r'\|[^>|]+\|>', '', generated_part, flags=re.IGNORECASE)
+
+        # Final cleanup: remove any fragments
+        generated_part = re.sub(r'[<|]+(assistant|system|user|pad|endoftext)[|>]+', '', generated_part, flags=re.IGNORECASE)
+
+        # Clean up whitespace
+        generated_part = generated_part.strip()
+
+        # Split by newlines and take first non-empty line
+        lines = [line.strip() for line in generated_part.split('\n') if line.strip()]
+        if lines:
+            generated_part = lines[0]
+        else:
+            generated_part = ''
+
+        # Only print if we have actual content
+        if generated_part:
+            print(generated_part)
+        else:
+            print("Sorry, I'm not sure what to say.", file=sys.stderr)
+            sys.exit(1)
 
     except Exception as e:
         print(f"Generation error: {e}", file=sys.stderr)
