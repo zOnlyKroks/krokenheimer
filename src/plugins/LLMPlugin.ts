@@ -136,6 +136,13 @@ export class LLMPlugin implements BotPlugin {
       // Generate a response using YOUR trained model (this takes time)
       const response = await modelInferenceService.generateMentionResponse(recentMessages, message.content, message.author.username);
 
+      // Validate response is not empty
+      if (!response || response.trim().length === 0) {
+        console.warn('⚠️  Model generated empty response, using fallback');
+        await message.reply('Hmm, I\'m not sure what to say right now. Still learning!');
+        return;
+      }
+
       await message.reply(response);
       console.log(`✅ Replied to mention from ${message.author.username}`);
 
@@ -310,6 +317,12 @@ export class LLMPlugin implements BotPlugin {
       // Generate message using LLM with RAG (passes channelId for vector search)
       console.log(`🤖 Generating message for #${channelName} (using RAG)...`);
       const generatedContent = await modelInferenceService.generateMessage(recentMessages, channelName, channelId);
+
+      // Validate response is not empty
+      if (!generatedContent || generatedContent.trim().length === 0) {
+        console.warn(`⚠️  Model generated empty response for #${channelName}, skipping message`);
+        return;
+      }
 
       // Get the channel and send message
       const channel = await this.client.channels.fetch(channelId);

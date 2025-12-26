@@ -420,8 +420,8 @@ export class FineTuningService {
             if (match) {
                 // @ts-ignore
                 const samples = parseInt(match[1]);
-                // batch_size=1, gradient_accumulation=4, epochs=10 (from train_from_scratch.py)
-                this.trainingProgress.totalSteps = Math.ceil((samples / 4) * 10);
+                // batch_size=1, gradient_accumulation=8, epochs=10 (from train_from_scratch.py)
+                this.trainingProgress.totalSteps = Math.ceil((samples / 8) * 10);
             }
         } else if (text.includes('Saving final model')) {
             this.trainingProgress.phase = 'saving';
