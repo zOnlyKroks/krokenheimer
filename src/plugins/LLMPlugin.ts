@@ -754,6 +754,12 @@ ${channelList}
       let embeddedCount = 0;
 
       for (const channel of channels) {
+        // Skip excluded channels
+        if (trainingConfig.isChannelExcluded(channel.channelId)) {
+          console.log(`  ⏭️  Skipping excluded channel #${channel.channelName}...`);
+          continue;
+        }
+
         const messages = messageStorageService.getMessagesByChannel(channel.channelId, 100000);
         console.log(`  📝 Re-embedding ${messages.length} messages from #${channel.channelName}...`);
 
