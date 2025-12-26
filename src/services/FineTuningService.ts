@@ -354,19 +354,29 @@ export class FineTuningService {
             pythonProcess.stdout.on('data', (data) => {
                 const text = data.toString();
                 stdout += text;
-                console.log(`   ${text.trim()}`);
 
-                // Parse training progress from output
-                this.parseTrainingProgress(text);
+                // Split by lines and process each
+                const lines = text.split('\n');
+                for (const line of lines) {
+                    if (line.trim()) {
+                        console.log(`   [TRAIN] ${line.trim()}`);
+                        this.parseTrainingProgress(line);
+                    }
+                }
             });
 
             pythonProcess.stderr.on('data', (data) => {
                 const text = data.toString();
                 stderr += text;
-                console.log(`   ${text.trim()}`);
 
-                // Also check stderr for progress (HuggingFace Trainer logs to stderr)
-                this.parseTrainingProgress(text);
+                // Split by lines and process each
+                const lines = text.split('\n');
+                for (const line of lines) {
+                    if (line.trim()) {
+                        console.log(`   [TRAIN-ERR] ${line.trim()}`);
+                        this.parseTrainingProgress(line);
+                    }
+                }
             });
 
             pythonProcess.on('close', async (code) => {
@@ -429,13 +439,21 @@ export class FineTuningService {
             this.trainingProgress.currentStep = parseInt(progressMatch[3]);
         }
 
-        // Also handle progress bar format: [123/456 12:34 < 45:67, 1.23 it/s]
-        const progressBarMatch = text.match(/\[(\d+)\/(\d+)/);
+        // Handle tqdm progress bar format: | 42/5090 [01:30<2:49:51, 2.02s/it]
+        const progressBarMatch = text.match(/\|\s*(\d+)\/(\d+)\s*\[/);
         if (progressBarMatch) {
             // @ts-ignore
             this.trainingProgress.currentStep = parseInt(progressBarMatch[1]);
             // @ts-ignore
             this.trainingProgress.totalSteps = parseInt(progressBarMatch[2]);
+        }
+
+        // Also parse percentage from tqdm: 1%|
+        const percentMatch = text.match(/(\d+)%\|/);
+        if (percentMatch && this.trainingProgress.totalSteps > 0) {
+            // Update epoch based on steps (totalSteps = steps * epochs)
+            const progress = this.trainingProgress.currentStep / this.trainingProgress.totalSteps;
+            this.trainingProgress.currentEpoch = progress * this.trainingProgress.totalEpochs;
         }
     }
 
