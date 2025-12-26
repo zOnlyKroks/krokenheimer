@@ -1,6 +1,6 @@
 import {ChromaClient, Collection} from 'chromadb';
 import {StoredMessage} from '../types/llm.js';
-import ollamaService from './OllamaService.js';
+import simpleEmbeddingService from './SimpleEmbeddingService.js';
 
 export class VectorStoreService {
   private client: ChromaClient;
@@ -30,8 +30,11 @@ export class VectorStoreService {
     }
 
     try {
-      // Generate embedding using Ollama
-      const embedding = await ollamaService.generateEmbedding(message.content);
+      // Update vocabulary for TF-IDF
+      simpleEmbeddingService.updateVocabulary(message.content);
+
+      // Generate embedding using simple TF-IDF (no pre-trained models)
+      const embedding = simpleEmbeddingService.generateEmbedding(message.content);
 
       // Store in ChromaDB
       await this.collection.add({
@@ -59,8 +62,8 @@ export class VectorStoreService {
     }
 
     try {
-      // Generate embedding for query
-      const queryEmbedding = await ollamaService.generateEmbedding(query);
+      // Generate embedding for query using simple TF-IDF (no pre-trained models)
+      const queryEmbedding = simpleEmbeddingService.generateEmbedding(query);
 
       // Build where clause
       const where = channelId ? { channelId } : undefined;
