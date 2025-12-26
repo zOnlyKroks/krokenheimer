@@ -131,65 +131,53 @@ def main():
         print("   Install with: pip install transformers datasets tokenizers")
         sys.exit(1)
 
-    # Load or create tokenizer
-    print("📥 Building custom tokenizer from YOUR Discord messages...")
+    # Always retrain tokenizer on ALL current messages (for vocabulary updates)
+    print("📥 Building custom tokenizer from ALL Discord messages...")
 
     tokenizer_path = f"./data/models/{args.output_name}/tokenizer.json"
 
     try:
-        if args.resume and os.path.exists(tokenizer_path):
-            # Load existing custom tokenizer
-            print(f"📂 Loading custom tokenizer from {tokenizer_path}")
-            tokenizer_obj = Tokenizer.from_file(tokenizer_path)
-            tokenizer = PreTrainedTokenizerFast(
-                tokenizer_object=tokenizer_obj,
-                bos_token='<|endoftext|>',
-                eos_token='<|endoftext|>',
-                unk_token='<|endoftext|>',
-                pad_token='<|pad|>'
-            )
-        else:
-            # Train NEW tokenizer on YOUR Discord data
-            print("🆕 Training NEW tokenizer from YOUR messages (no pre-trained vocab)")
+        # ALWAYS retrain tokenizer on ALL messages to learn new vocabulary
+        print("🔄 Retraining tokenizer on ALL messages (learns new words/slang/emojis)")
 
-            # Create BPE tokenizer
-            tokenizer_obj = Tokenizer(models.BPE(unk_token='<|endoftext|>'))
-            tokenizer_obj.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
-            tokenizer_obj.decoder = decoders.ByteLevel()
+        # Create BPE tokenizer
+        tokenizer_obj = Tokenizer(models.BPE(unk_token='<|endoftext|>'))
+        tokenizer_obj.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+        tokenizer_obj.decoder = decoders.ByteLevel()
 
-            # Prepare special tokens
-            special_tokens = ['<|endoftext|>', '<|pad|>', '<|system|>', '<|user|>', '<|assistant|>']
+        # Prepare special tokens
+        special_tokens = ['<|endoftext|>', '<|pad|>', '<|system|>', '<|user|>', '<|assistant|>']
 
-            # Train on YOUR data
-            trainer = trainers.BpeTrainer(
-                vocab_size=8000,  # Small vocab for limited data
-                special_tokens=special_tokens,
-                show_progress=True,
-                min_frequency=2
-            )
+        # Train on ALL YOUR data (old + new messages)
+        trainer = trainers.BpeTrainer(
+            vocab_size=8000,  # Small vocab for limited data
+            special_tokens=special_tokens,
+            show_progress=True,
+            min_frequency=2
+        )
 
-            # Load training data to build vocabulary
-            raw_data = load_training_data(args.training_data)
-            texts = [format_conversation(ex) for ex in raw_data]
+        # Load training data to build vocabulary
+        raw_data = load_training_data(args.training_data)
+        texts = [format_conversation(ex) for ex in raw_data]
 
-            print(f"   Training tokenizer on {len(texts)} Discord conversations...")
-            tokenizer_obj.train_from_iterator(texts, trainer=trainer)
+        print(f"   Training tokenizer on {len(texts)} Discord conversations...")
+        tokenizer_obj.train_from_iterator(texts, trainer=trainer)
 
-            # Save the custom tokenizer
-            os.makedirs(f"./data/models/{args.output_name}", exist_ok=True)
-            tokenizer_obj.save(tokenizer_path)
-            print(f"✓ Custom tokenizer saved to {tokenizer_path}")
+        # Save the custom tokenizer
+        os.makedirs(f"./data/models/{args.output_name}", exist_ok=True)
+        tokenizer_obj.save(tokenizer_path)
+        print(f"✓ Custom tokenizer saved to {tokenizer_path}")
 
-            # Wrap in HuggingFace tokenizer
-            tokenizer = PreTrainedTokenizerFast(
-                tokenizer_object=tokenizer_obj,
-                bos_token='<|endoftext|>',
-                eos_token='<|endoftext|>',
-                unk_token='<|endoftext|>',
-                pad_token='<|pad|>'
-            )
+        # Wrap in HuggingFace tokenizer
+        tokenizer = PreTrainedTokenizerFast(
+            tokenizer_object=tokenizer_obj,
+            bos_token='<|endoftext|>',
+            eos_token='<|endoftext|>',
+            unk_token='<|endoftext|>',
+            pad_token='<|pad|>'
+        )
 
-        print(f"✓ Tokenizer vocabulary size: {len(tokenizer)} (learned from YOUR messages)")
+        print(f"✓ Tokenizer vocabulary size: {len(tokenizer)} (learned from ALL YOUR messages)")
         print(f"✓ Special tokens: {tokenizer.all_special_tokens}")
 
         # Check if resuming from checkpoint or completed model
