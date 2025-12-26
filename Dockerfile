@@ -56,6 +56,7 @@ RUN python3 -m venv /opt/training-venv && \
     sentencepiece \
     protobuf \
     ninja \
+    matplotlib \
     packaging
 
 # Verify installation works (with better error reporting)
