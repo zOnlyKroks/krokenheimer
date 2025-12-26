@@ -677,7 +677,7 @@ ${channelList}
         return;
       }
 
-      await message.reply(`🚀 Starting training with ${totalMessages} messages...\n⏳ This will take 3-7 days on CPU. Bot will continue working normally.\n💡 Use \`!llmtrain status\` to check progress.`);
+      await message.reply(`🚀 Starting from-scratch training with ${totalMessages} messages...\n⏳ Training a GPT-2 Small (124M params) model from scratch - this will take several hours.\n💡 Use \`!llmtrain status\` to check progress.\n⚠️  Note: Model quality improves as more messages are collected and trained on.`);
 
       // Start training in background
       fineTuningService.startTraining().catch(err => {

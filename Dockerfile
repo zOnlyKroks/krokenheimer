@@ -35,7 +35,7 @@ RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import su
 # Create /app directory BEFORE trying to symlink to it
 RUN mkdir -p /app
 
-# Install CPU-compatible training environment with VERSION PINNING
+# Install CPU-compatible training environment for from-scratch training
 RUN python3 -m venv /opt/training-venv && \
     /opt/training-venv/bin/pip install --upgrade pip && \
     /opt/training-venv/bin/pip install --no-cache-dir \
@@ -47,10 +47,8 @@ RUN python3 -m venv /opt/training-venv && \
     "numpy<2" && \
     /opt/training-venv/bin/pip install --no-cache-dir \
     transformers==4.36.0 \
-    trl==0.7.4 \
     datasets==2.16.0 \
-    accelerate==0.25.0 \
-    peft==0.7.0 && \
+    accelerate==0.25.0 && \
     /opt/training-venv/bin/pip install --no-cache-dir \
     scipy \
     sentencepiece \
@@ -67,11 +65,9 @@ RUN echo "Testing PyTorch installation..." && \
     /opt/training-venv/bin/python -c "import numpy; print(f'✓ NumPy {numpy.__version__}')" && \
     echo "Testing Transformers installation..." && \
     /opt/training-venv/bin/python -c "import transformers; print(f'✓ Transformers {transformers.__version__}')" && \
-    echo "Testing PEFT installation..." && \
-    /opt/training-venv/bin/python -c "import peft; print(f'✓ PEFT {peft.__version__}')" && \
     echo "Testing psutil installation..." && \
     /opt/training-venv/bin/python -c "import psutil; print(f'✓ psutil {psutil.__version__}')" && \
-    echo "✅ CPU training environment ready"
+    echo "✅ From-scratch training environment ready"
 
 WORKDIR /app
 

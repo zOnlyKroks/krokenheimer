@@ -16,10 +16,10 @@ export class FineTuningService {
     currentStep: 0,
     totalSteps: 0,
     currentEpoch: 0,
-    totalEpochs: 1,  // Updated to match train_text_lora.py
+    totalEpochs: 10,  // From-scratch training needs more epochs
     currentLoss: 0,
     startTime: 0,
-    phase: 'idle' as 'idle' | 'preparing' | 'training' | 'saving' | 'importing'
+    phase: 'idle' as 'idle' | 'preparing' | 'training' | 'saving'
   };
 
   constructor() {
@@ -278,9 +278,6 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
       // Export training data
       const trainingDataPath = await this.exportTrainingData();
 
-      // Get current base model
-      const baseModel = ollamaService.getConfig().model;
-
       // Check if we have enough data
       const totalMessages = messageStorageService.getTotalMessageCount();
       if (totalMessages < 500) {
@@ -290,12 +287,12 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
       }
 
       console.log(`📚 Training with ${totalMessages} total messages`);
-      console.log('⏳ This will take 3-7 days on CPU. Bot will continue working normally.');
+      console.log('⏳ This will take several hours on CPU. Bot will continue working normally.');
       console.log('💡 Training runs in the background.');
 
-      // Start TRUE fine-tuning with Unsloth (LoRA training)
-      console.log('🔥 Starting TRUE LoRA fine-tuning with Unsloth...');
-      await this.trainWithUnsloth(baseModel, trainingDataPath);
+      // Start from-scratch training (incremental)
+      console.log('🔥 Starting from-scratch training (GPT-2 Small)...');
+      await this.trainFromScratch(trainingDataPath);
 
       // Update state
       this.lastTrainMessageCount = totalMessages;
@@ -303,11 +300,8 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
       this.modelVersion++;
       await this.saveState();
 
-      console.log('✅ Model created successfully');
-      console.log(`📦 New model: ${this.modelBaseName}-v${this.modelVersion}`);
-
-      // Automatically switch to the new model
-      await this.switchToNewModel();
+      console.log('✅ Model training complete!');
+      console.log(`📦 Model: ${this.modelBaseName} (incrementally trained)`);
 
     } catch (error) {
       console.error('❌ Training failed:', error);
@@ -316,43 +310,66 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
     }
   }
 
-    private async trainWithUnsloth(baseModel: string, trainingDataPath: string): Promise<void> {
+    private async trainFromScratch(trainingDataPath: string): Promise<void> {
         return new Promise(async (resolve, reject) => {
-            const modelName = `${this.modelBaseName}-v${this.modelVersion + 1}`;
+            const modelName = this.modelBaseName; // Single model, incrementally trained
 
-            console.log(`🔥 Training ${modelName} with CPU LoRA...`);
+            console.log(`🔥 Training from scratch (GPT-2 Small 124M params)...`);
 
             // Initialize training progress
             this.trainingProgress = {
                 currentStep: 0,
                 totalSteps: 0,
                 currentEpoch: 0,
-                totalEpochs: 1,  // Updated to match train_text_lora.py
+                totalEpochs: 10,  // From-scratch needs more epochs
                 currentLoss: 0,
                 startTime: Date.now(),
                 phase: 'preparing'
             };
 
-            // Convert Ollama model to HuggingFace format
-            const hfModel = this.ollamaToHuggingFace(baseModel);
-
-            console.log(`   Base model: ${hfModel}`);
             console.log(`   Training data: ${trainingDataPath}`);
 
-            // Run the CORRECT training script
+            // Check if we have a checkpoint to resume from
+            const modelDir = `./data/models/${modelName}`;
+            let resumeCheckpoint = null;
+
+            try {
+                const checkpoints = await fs.readdir(modelDir);
+                const checkpointDirs = checkpoints.filter(f => f.startsWith('checkpoint-'));
+
+                if (checkpointDirs.length > 0) {
+                    // Get latest checkpoint
+                    checkpointDirs.sort((a, b) => {
+                        const numA = parseInt(a.replace('checkpoint-', ''));
+                        const numB = parseInt(b.replace('checkpoint-', ''));
+                        return numB - numA;
+                    });
+                    resumeCheckpoint = `${modelDir}/${checkpointDirs[0]}`;
+                    console.log(`📂 Resuming from checkpoint: ${checkpointDirs[0]}`);
+                }
+            } catch (error) {
+                console.log('📝 Starting fresh training (no checkpoint found)');
+            }
+
+            // Run the from-scratch training script
             const pythonCmd = await fs.access('./venv/bin/python3')
                 .then(() => './venv/bin/python3')
                 .catch(() => 'python3');
 
             console.log(`   Python: ${pythonCmd}`);
 
-            // Use the text LoRA training script
-            const pythonProcess = spawn(pythonCmd, [
-                './scripts/train_text_lora.py',
-                hfModel,
+            const args = [
+                './scripts/train_from_scratch.py',
                 trainingDataPath,
-                modelName
-            ]);
+                modelName,
+                '--epochs', '10'
+            ];
+
+            if (resumeCheckpoint) {
+                args.push('--resume', resumeCheckpoint);
+            }
+
+            const pythonProcess = spawn(pythonCmd, args);
 
             let stdout = '';
             let stderr = '';
@@ -378,12 +395,7 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
             pythonProcess.on('close', async (code) => {
                 if (code === 0) {
                     console.log(`✅ Training complete!`);
-
-                    // Update phase to importing
-                    this.trainingProgress.phase = 'importing';
-
-                    // Import into Ollama
-                    await this.importModelToOllama(modelName);
+                    console.log(`📦 Model saved to: ${modelDir}`);
 
                     // Reset progress
                     this.trainingProgress.phase = 'idle';
@@ -413,18 +425,18 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
 
     private parseTrainingProgress(text: string): void {
         // Check for phase changes
-        if (text.includes('STARTING TRAINING')) {
+        if (text.includes('STARTING TRAINING FROM SCRATCH')) {
             this.trainingProgress.phase = 'training';
         } else if (text.includes('Training samples:')) {
-            // Extract total steps estimate: samples / batch_size / gradient_accumulation
+            // Extract total steps estimate: samples / batch_size / gradient_accumulation / epochs
             const match = text.match(/Training samples:\s*(\d+)/);
             if (match) {
                 // @ts-ignore
                 const samples = parseInt(match[1]);
-                // batch_size=1, gradient_accumulation=4, epochs=1 (updated to match train_text_lora.py)
-                this.trainingProgress.totalSteps = Math.ceil((samples / 4) * 1);
+                // batch_size=1, gradient_accumulation=4, epochs=10 (from train_from_scratch.py)
+                this.trainingProgress.totalSteps = Math.ceil((samples / 4) * 10);
             }
-        } else if (text.includes('Saving model')) {
+        } else if (text.includes('Saving final model')) {
             this.trainingProgress.phase = 'saving';
         }
 
@@ -450,93 +462,8 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
         }
     }
 
-  private ollamaToHuggingFace(ollamaModel: string): string {
-    // Map to OPEN models (no authentication required)
-    const modelMap: Record<string, string> = {
-      'llama3.2:3b': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',  // Open alternative
-      'llama3.2:1b': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
-      'llama3.1:8b': 'mistralai/Mistral-7B-Instruct-v0.2',  // Open
-      'llama3:8b': 'mistralai/Mistral-7B-Instruct-v0.2',
-      'mistral:7b': 'mistralai/Mistral-7B-Instruct-v0.2',
-    };
-
-    // @ts-ignore
-    return modelMap[ollamaModel] || 'TinyLlama/TinyLlama-1.1B-Chat-v1.0';  // Default to TinyLlama (1.1B, fully open)
-  }
-
-    private async importModelToOllama(modelName: string): Promise<void> {
-        console.log(`📦 Importing trained model into Ollama...`);
-
-        const modelDir = `./data/models/${modelName}`;
-        const modelfilePath = `${modelDir}/Modelfile`;
-
-        // Check if Modelfile exists, create if not
-        try {
-            await fs.access(modelfilePath);
-        } catch {
-            // Create simple Modelfile
-            const config = ollamaService.getConfig();
-            const modelfileContent = `FROM ${modelDir}
-
-PARAMETER temperature ${config.temperature}
-PARAMETER num_ctx ${config.contextWindow}
-
-SYSTEM You are a member of this Discord server who knows everything that has been said in all channels. You have perfect memory of every conversation. Match the tone and style of the server.`;
-
-            await fs.writeFile(modelfilePath, modelfileContent);
-        }
-
-        return new Promise((resolve, reject) => {
-            const importProcess = spawn('ollama', ['create', modelName, '-f', modelfilePath]);
-
-            importProcess.stdout.on('data', (data) => {
-                console.log(`   ${data.toString().trim()}`);
-            });
-
-            importProcess.stderr.on('data', (data) => {
-                console.error(`   ${data.toString().trim()}`);
-            });
-
-            importProcess.on('close', (code) => {
-                if (code === 0) {
-                    console.log(`✅ Model ${modelName} imported to Ollama!`);
-                    resolve();
-                } else {
-                    reject(new Error(`Ollama import failed with code ${code}`));
-                }
-            });
-        });
-    }
-
-  async switchToNewModel(): Promise<void> {
-    const newModelName = `${this.modelBaseName}-v${this.modelVersion}`;
-
-    console.log(`🔄 Switching to new model: ${newModelName}`);
-
-    // Check if model exists
-    const { Ollama } = await import('ollama');
-    const ollama = new Ollama();
-
-    try {
-      const models = await ollama.list();
-      const modelExists = models.models.some(m => m.name.includes(newModelName));
-
-      if (modelExists) {
-        ollamaService.setModel(newModelName);
-        console.log(`✅ Now using model: ${newModelName}`);
-      } else {
-        console.log(`⚠️  Model ${newModelName} not found, keeping current model`);
-      }
-    } catch (error) {
-      console.error('❌ Failed to switch model:', error);
-    }
-  }
-
   getCurrentModelName(): string {
-    if (this.modelVersion > 0) {
-      return `${this.modelBaseName}-v${this.modelVersion}`;
-    }
-    return ollamaService.getConfig().model;
+    return `${this.modelBaseName} (v${this.modelVersion} - trained from scratch)`;
   }
 }
 
