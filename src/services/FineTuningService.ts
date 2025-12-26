@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import { spawn } from 'child_process';
 import messageStorageService from './MessageStorageService.js';
+import trainingConfig from '../config/trainingConfig.js';
 
 export class FineTuningService {
   private isTraining = false;
@@ -181,11 +182,23 @@ export class FineTuningService {
     const allMessages = messageStorageService.getAllMessages();
     console.log(`📦 Loaded ${allMessages.length} messages from database`);
 
+    // Filter messages based on training config
+    const filteredMessages = allMessages.filter(msg =>
+      trainingConfig.shouldIncludeInTraining(msg.authorId, msg.channelId)
+    );
+
+    const excludedCount = allMessages.length - filteredMessages.length;
+    if (excludedCount > 0) {
+      console.log(`🚫 Filtered out ${excludedCount} messages (bot messages + excluded channels)`);
+      console.log(`   Excluded channels: ${trainingConfig.getExcludedChannels().join(', ')}`);
+    }
+    console.log(`✅ Using ${filteredMessages.length} messages for training (from ALL servers)`);
+
     const trainingData: Array<{ messages: Array<{ role: string; content: string }> }> = [];
 
     // Group messages into conversation windows
-    for (let i = 0; i < allMessages.length - 5; i += 3) {
-      const window = allMessages.slice(i, i + 10);
+    for (let i = 0; i < filteredMessages.length - 5; i += 3) {
+      const window = filteredMessages.slice(i, i + 10);
 
       // Skip if window is too small
       if (window.length < 5) continue;

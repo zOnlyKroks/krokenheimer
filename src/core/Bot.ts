@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, Message } from "discord.js";
 import type { BotPlugin, BotCommand, BotConfig } from "../types/index.ts";
 import { Logger } from "./util/logger.js";
+import trainingConfig from "../config/trainingConfig.js";
 
 export class ExtensibleBot {
   private client: Client;
@@ -27,6 +28,11 @@ export class ExtensibleBot {
   private setupEventHandlers(): void {
     this.client.once("ready", () => {
       this.logger.info(`✅ Bot logged in as ${this.client.user?.tag}`);
+
+      // Set bot user ID for training filter
+      if (this.client.user) {
+        trainingConfig.setBotUserId(this.client.user.id);
+      }
     });
 
     this.client.on("messageCreate", async (message) => {

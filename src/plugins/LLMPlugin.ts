@@ -5,6 +5,7 @@ import messageStorageService from '../services/MessageStorageService.js';
 import vectorStoreService from '../services/VectorStoreService.js';
 import modelInferenceService from '../services/ModelInferenceService.js';
 import fineTuningService from '../services/FineTuningService.js';
+import trainingConfig from '../config/trainingConfig.js';
 import cron from 'node-cron';
 import { MessageGenerationConfig } from '../types/llm.js';
 
@@ -46,6 +47,17 @@ export class LLMPlugin implements BotPlugin {
       name: 'llmclear',
       description: 'Clear vector store (use after switching embedding methods)',
       execute: this.clearVectorStore.bind(this),
+    },
+    {
+      name: 'llmexclude',
+      description: 'Manage channels excluded from training',
+      usage: 'llmexclude [add|remove|list] [channelId]',
+      execute: this.manageExclusions.bind(this),
+    },
+    {
+      name: 'llmconfig',
+      description: 'Show training configuration',
+      execute: this.showTrainingConfig.bind(this),
     }
   ];
 
@@ -763,6 +775,109 @@ ${channelList}
       console.error('Failed to clear vector store:', error);
       await message.reply('❌ Failed to clear vector store. Check console for details.');
     }
+  }
+
+  private async manageExclusions(message: Message, args: string[]): Promise<void> {
+    const action = args[0]?.toLowerCase();
+    const channelId = args[1];
+
+    if (!action || !['add', 'remove', 'list'].includes(action)) {
+      await message.reply('Usage: `!llmexclude [add|remove|list] [channelId]`\nExample: `!llmexclude add 1234567890`');
+      return;
+    }
+
+    if (action === 'list') {
+      const excluded = trainingConfig.getExcludedChannels();
+      if (excluded.length === 0) {
+        await message.reply('📋 No channels are excluded from training.\n\n💡 The bot learns from ALL servers you invite it to!');
+        return;
+      }
+
+      let response = '📋 **Channels excluded from training:**\n\n';
+      for (const id of excluded) {
+        const channel = await this.client?.channels.fetch(id).catch(() => null);
+        const channelName = channel && 'name' in channel ? `#${channel.name}` : 'Unknown';
+        response += `• ${channelName} (${id})\n`;
+      }
+      response += '\n💡 The bot learns from ALL servers you invite it to (except these channels)!';
+      await message.reply(response);
+      return;
+    }
+
+    if (!channelId) {
+      await message.reply('❌ Please provide a channel ID.\nExample: `!llmexclude add 1234567890`\nTip: Right-click a channel → Copy Channel ID');
+      return;
+    }
+
+    if (action === 'add') {
+      trainingConfig.addExcludedChannel(channelId);
+      const channel = await this.client?.channels.fetch(channelId).catch(() => null);
+      const channelName = channel && 'name' in channel ? `#${channel.name}` : channelId;
+      await message.reply(`✅ Added ${channelName} to training exclusion list.\n\n⚠️  This only affects FUTURE training. Run \`!llmtrain now\` to retrain without this channel.`);
+    } else if (action === 'remove') {
+      trainingConfig.removeExcludedChannel(channelId);
+      const channel = await this.client?.channels.fetch(channelId).catch(() => null);
+      const channelName = channel && 'name' in channel ? `#${channel.name}` : channelId;
+      await message.reply(`✅ Removed ${channelName} from training exclusion list.\n\n💡 Run \`!llmtrain now\` to include this channel in training.`);
+    }
+  }
+
+  private async showTrainingConfig(message: Message): Promise<void> {
+    const config = trainingConfig.getStatusInfo();
+    const channels = messageStorageService.getActiveChannels();
+    const totalMessages = messageStorageService.getTotalMessageCount();
+    const trainingStatus = fineTuningService.getTrainingStatus();
+
+    // Count messages from different servers
+    const serverCounts = new Map<string, number>();
+    for (const channel of channels) {
+      // In Discord.js, we can't easily get server name from channel ID without fetching
+      // But we can show that it's multi-server
+      const fetchedChannel = await this.client?.channels.fetch(channel.channelId).catch(() => null);
+      if (fetchedChannel && 'guild' in fetchedChannel && fetchedChannel.guild) {
+        const serverName = fetchedChannel.guild.name;
+        serverCounts.set(serverName, (serverCounts.get(serverName) || 0) + channel.count);
+      }
+    }
+
+    let response = '⚙️ **Training Configuration**\n\n';
+    response += `🤖 **Bot User ID:** ${config.botUserId || 'Not set yet'}\n`;
+    response += `🌍 **Multi-Server Support:** ✅ Enabled (learns from ALL servers)\n`;
+    response += `📊 **Total Messages:** ${totalMessages.toLocaleString()}\n`;
+    response += `📁 **Active Channels:** ${channels.length}\n\n`;
+
+    if (serverCounts.size > 0) {
+      response += `🏠 **Messages per Server:**\n`;
+      for (const [server, count] of serverCounts) {
+        response += `• ${server}: ${count.toLocaleString()} messages\n`;
+      }
+      response += '\n';
+    }
+
+    if (config.excludedChannels.length > 0) {
+      response += `🚫 **Excluded Channels:** ${config.excludedChannels.length}\n`;
+      for (const id of config.excludedChannels) {
+        const channel = await this.client?.channels.fetch(id).catch(() => null);
+        const channelName = channel && 'name' in channel ? `#${channel.name}` : 'Unknown';
+        response += `• ${channelName} (${id})\n`;
+      }
+      response += '\n';
+    } else {
+      response += `🚫 **Excluded Channels:** None\n\n`;
+    }
+
+    response += `🎓 **Training Filters:**\n`;
+    response += `• Bot's own messages: ❌ Not included\n`;
+    response += `• Other bots' messages: ❌ Not included\n`;
+    response += `• User messages: ✅ Included (all servers)\n\n`;
+
+    response += `📈 **Training Status:**\n`;
+    response += `• Currently training: ${trainingStatus.isTraining ? '✅ Yes' : '❌ No'}\n`;
+    response += `• Messages since last train: ${trainingStatus.messagesSinceLastTrain.toLocaleString()}\n\n`;
+
+    response += `💡 **Tip:** Use \`!llmexclude add <channelId>\` to exclude channels from training.`;
+
+    await message.reply(response);
   }
 
   async cleanup(): Promise<void> {
