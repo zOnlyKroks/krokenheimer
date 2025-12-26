@@ -33,7 +33,7 @@ export class LLMPlugin implements BotPlugin {
     {
       name: 'llmscan',
       description: 'Configure or trigger message scanning',
-      usage: 'llmscan [interval_minutes|now]',
+      usage: 'llmscan [interval_minutes|now|full]',
       execute: this.configureScan.bind(this),
     },
     {
@@ -524,7 +524,8 @@ export class LLMPlugin implements BotPlugin {
 
 **Usage:**
 \`!llmscan <minutes>\` - Set scan interval (1-60 minutes)
-\`!llmscan now\` - Trigger immediate scan
+\`!llmscan now\` - Scan only new messages
+\`!llmscan full\` - FULL scan (ignore timestamps, scan ALL messages)
       `;
       await message.reply(statusText);
       return;
@@ -533,15 +534,22 @@ export class LLMPlugin implements BotPlugin {
     const arg = args[0]?.toLowerCase() || '';
 
     // Trigger immediate scan
-    if (arg === 'now') {
+    if (arg === 'now' || arg === 'full' || arg === 'force') {
       if (this.isScanning) {
         await message.reply('⚠️  A scan is already in progress. Please wait for it to complete.');
         return;
       }
 
-      await message.reply('🔍 Starting channel scan...');
+      const forceFullScan = (arg === 'full' || arg === 'force');
+
+      if (forceFullScan) {
+        await message.reply('🔍 Starting FULL channel scan (ignoring timestamps)...');
+      } else {
+        await message.reply('🔍 Starting channel scan...');
+      }
+
       const startTime = Date.now();
-      await this.scanAllChannels();
+      await this.scanAllChannels(forceFullScan);
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
       await message.reply(`✅ Scan completed in ${duration}s`);
       return;
@@ -727,10 +735,16 @@ ${channelList}
         for (const msg of messages) {
           await vectorStoreService.storeMessage(msg);
           embeddedCount++;
+
+          // Progress update every 1000 messages
+          if (embeddedCount % 1000 === 0) {
+            console.log(`     Progress: ${embeddedCount}/${totalMessages} embedded...`);
+          }
         }
       }
 
       const vectorCount = await vectorStoreService.getCollectionCount();
+      console.log(`✅ Re-embedding complete! ${embeddedCount} messages processed, ${vectorCount} stored in vector DB.`);
       await message.reply(`✅ Vector store rebuilt with TF-IDF embeddings!\n📊 Stored ${vectorCount} message embeddings (${embeddedCount} processed).`);
     } catch (error) {
       console.error('Failed to clear vector store:', error);
