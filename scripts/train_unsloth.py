@@ -1,158 +1,322 @@
-#!/usr/bin/env python3
-"""
-CPU-Compatible LoRA Fine-tuning Script for Krokenheimer Bot
-Uses HuggingFace Transformers + PEFT (no Unsloth - that requires GPU)
-"""
-
-import json
-import sys
-import os
 import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    TrainingArguments,
-    Trainer,
-    DataCollatorForLanguageModeling
-)
-from peft import LoraConfig, get_peft_model, TaskType
-from datasets import load_dataset
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import os
+import time
+import psutil
+from torch.utils.data import DataLoader, Dataset
+import warnings
+warnings.filterwarnings('ignore')
 
-# Config
-MAX_SEQ_LENGTH = 2048
+# ==================== XEON-SPECIFIC OPTIMIZATION ====================
+# Your CPU: 8 cores, 16 threads (Xeon with hyperthreading)
+NUM_PHYSICAL_CORES = 8
+NUM_LOGICAL_CORES = 16
 
-def load_training_data(jsonl_path):
-    """Load JSONL training data"""
-    print(f"📂 Loading training data from {jsonl_path}")
-    dataset = load_dataset('json', data_files=jsonl_path, split='train')
-    print(f"✅ Loaded {len(dataset)} training examples")
-    return dataset
+# Optimal settings for Xeon with hyperthreading
+os.environ['OMP_NUM_THREADS'] = '8'  # Use physical cores for OpenMP
+os.environ['MKL_NUM_THREADS'] = '8'  # Use physical cores for MKL
+os.environ['OPENBLAS_NUM_THREADS'] = '8'
+os.environ['VECLIB_MAXIMUM_THREADS'] = '8'
+os.environ['NUMEXPR_NUM_THREADS'] = '8'
 
-def format_prompts(examples, tokenizer):
-    """Format data for training"""
-    texts = []
-    for messages in examples['messages']:
-        # Convert chat format to single string
-        text = ""
-        for msg in messages:
-            if msg['role'] == 'system':
-                text += f"### System:\n{msg['content']}\n\n"
-            elif msg['role'] == 'user':
-                text += f"### User:\n{msg['content']}\n\n"
-            elif msg['role'] == 'assistant':
-                text += f"### Assistant:\n{msg['content']}"
-        texts.append(text)
+# PyTorch configuration
+torch.set_num_threads(8)  # Use physical cores for PyTorch ops
+torch.set_num_interop_threads(1)  # Better for many small operations
 
-    # Tokenize
-    return tokenizer(texts, truncation=True, max_length=MAX_SEQ_LENGTH, padding="max_length")
+# Enable all CPU optimizations
+torch.backends.mkldnn.enabled = True
+torch.backends.mkl.enabled = True
 
-def main():
-    if len(sys.argv) < 4:
-        print("Usage: train_cpu.py <base_model> <training_data.jsonl> <output_model_name>")
-        sys.exit(1)
+# DataLoader workers: use logical cores for I/O
+NUM_WORKERS = 12  # Leave 4 threads for system/other processes
 
-    base_model = sys.argv[1]
-    training_data_path = sys.argv[2]
-    output_model_name = sys.argv[3]
+print(f"=== Xeon CPU Configuration ===")
+print(f"Physical Cores: {NUM_PHYSICAL_CORES}")
+print(f"Logical Cores: {NUM_LOGICAL_CORES}")
+print(f"PyTorch Threads: {torch.get_num_threads()}")
+print(f"DataLoader Workers: {NUM_WORKERS}")
+print(f"RAM: 32GB Total, {psutil.virtual_memory().available / 1e9:.1f}GB Available")
+print("=" * 50)
 
-    # Set nice priority to not kill the server
-    os.nice(19)  # Lowest CPU priority
+# ==================== MEMORY-EFFICIENT DATALOADER ====================
+class OptimizedDataLoader:
+    @staticmethod
+    def create_dataloader(dataset, batch_size, shuffle=True, collate_fn=None):
+        """Optimized DataLoader for 32GB RAM"""
 
-    # Limit threads to prevent CPU overload
-    torch.set_num_threads(2)  # Use only 2 CPU threads
+        # Dynamically adjust batch size based on available memory
+        available_ram = psutil.virtual_memory().available / 1e9
+        if available_ram < 4:  # Less than 4GB free
+            batch_size = max(1, batch_size // 2)
+            print(f"Warning: Low RAM ({available_ram:.1f}GB free). Reducing batch size to {batch_size}")
 
-    print("🚀 Starting CPU LoRA Fine-tuning (HuggingFace + PEFT)")
-    print(f"   Base model: {base_model}")
-    print(f"   Output: {output_model_name}")
-    print(f"   Device: CPU (expect 3-7 days)")
-    print(f"   ⚙️  CPU threads limited to 2 (low priority)")
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=NUM_WORKERS,
+            pin_memory=False,
+            persistent_workers=True if NUM_WORKERS > 0 else False,
+            prefetch_factor=2,
+            drop_last=True,  # Better for optimization
+            multiprocessing_context='spawn' if NUM_WORKERS > 0 else None,
+            collate_fn=collate_fn
+        )
 
-    # Load model and tokenizer
-    print("\n📥 Loading base model...")
-    print("   This will download ~2GB on first run (5-15 minutes)")
-    print("   Loading model into RAM...")
+# ==================== XEON-OPTIMIZED TRAINING ====================
+def train_epoch_xeon(model, train_loader, criterion, optimizer, device,
+                     epoch, total_epochs, accumulation_steps=2):
+    """Training optimized for Xeon CPUs with 32GB RAM"""
 
-    tokenizer = AutoTokenizer.from_pretrained(base_model)
-    tokenizer.pad_token = tokenizer.eos_token
-    print("   ✅ Tokenizer loaded")
+    model.train()
+    total_loss = 0
+    correct = 0
+    total = 0
 
-    print("   📦 Loading model weights (this takes a few minutes on CPU)...")
-    sys.stdout.flush()  # Force flush to see progress immediately
+    # Monitoring
+    mem_monitor = psutil.Process()
+    batch_times = []
 
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model,
-        dtype=torch.float32,  # CPU needs float32 (was torch_dtype, now deprecated)
-        low_cpu_mem_usage=True
+    optimizer.zero_grad()
+
+    for batch_idx, (data, target) in enumerate(train_loader):
+        batch_start = time.time()
+
+        # Move to device
+        data, target = data.to(device), target.to(device)
+
+        # Use mixed precision if available (PyTorch 1.10+)
+        if hasattr(torch, 'cpu') and hasattr(torch.cpu, 'amp'):
+            with torch.cpu.amp.autocast():
+                output = model(data)
+                loss = criterion(output, target) / accumulation_steps
+        else:
+            # Fallback to regular precision
+            output = model(data)
+            loss = criterion(output, target) / accumulation_steps
+
+        # Backward
+        loss.backward()
+
+        # Gradient accumulation
+        if (batch_idx + 1) % accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+        # Statistics
+        total_loss += loss.item() * accumulation_steps
+        _, predicted = output.max(1)
+        total += target.size(0)
+        correct += predicted.eq(target).sum().item()
+
+        # Timing
+        batch_time = time.time() - batch_start
+        batch_times.append(batch_time)
+
+        # Memory usage
+        mem_used = mem_monitor.memory_info().rss / 1e9  # GB
+
+        # Progress update every 5 batches
+        if batch_idx % 5 == 0 or batch_idx == len(train_loader) - 1:
+            avg_time = np.mean(batch_times[-5:]) if len(batch_times) >= 5 else batch_time
+            eta = avg_time * (len(train_loader) - batch_idx - 1) / 60  # minutes
+
+            print(f'\rEpoch {epoch+1}/{total_epochs} | '
+                  f'Batch {batch_idx+1}/{len(train_loader)} | '
+                  f'Loss: {loss.item()*accumulation_steps:.4f} | '
+                  f'Acc: {100.*correct/total:.1f}% | '
+                  f'Time: {avg_time:.1f}s/it | '
+                  f'ETA: {eta:.0f}m | '
+                  f'RAM: {mem_used:.1f}GB', end='')
+
+    print()  # New line after epoch
+    return total_loss / len(train_loader), 100. * correct / total
+
+# ==================== OPTIMIZED VALIDATION ====================
+@torch.no_grad()
+def validate_xeon(model, val_loader, criterion, device):
+    """Validation without gradient overhead"""
+    model.eval()
+    total_loss = 0
+    correct = 0
+    total = 0
+
+    # Disable gradient for the entire validation
+    with torch.no_grad():
+        for data, target in val_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            loss = criterion(output, target)
+
+            total_loss += loss.item()
+            _, predicted = output.max(1)
+            total += target.size(0)
+            correct += predicted.eq(target).sum().item()
+
+    return total_loss / len(val_loader), 100. * correct / total
+
+# ==================== MEMORY-EFFICIENT BATCH COLLATOR ====================
+def efficient_collate_fn(batch):
+    """Custom collate function to reduce memory overhead"""
+    if isinstance(batch[0], tuple):
+        # Separate data and targets
+        data = [item[0] for item in batch]
+        targets = [item[1] for item in batch]
+
+        # Stack with minimal copying
+        if isinstance(data[0], torch.Tensor):
+            data = torch.stack(data, dim=0)
+        else:
+            data = torch.tensor(np.array(data))
+
+        if isinstance(targets[0], torch.Tensor):
+            targets = torch.stack(targets, dim=0)
+        else:
+            targets = torch.tensor(targets)
+
+        return data, targets
+    return torch.utils.data.default_collate(batch)
+
+# ==================== MAIN TRAINING FUNCTION ====================
+def train_xeon_optimized(model, train_dataset, val_dataset,
+                         num_epochs=100, batch_size=32, learning_rate=0.001):
+    """
+    Main training function optimized for Xeon + 32GB RAM
+    
+    Recommendations for your setup:
+    - batch_size: 16-32 (depends on model size)
+    - accumulation_steps: 2-4 (simulates larger batch)
+    """
+
+    device = torch.device('cpu')
+    print(f"\nTraining on: {device}")
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+    # Create optimized loaders with custom collate
+    train_loader = OptimizedDataLoader.create_dataloader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        collate_fn=efficient_collate_fn
     )
-    print("   ✅ Model loaded into memory")
-    sys.stdout.flush()
 
-    # Add LoRA adapters
-    print("🔧 Adding LoRA adapters...")
-    lora_config = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        r=16,  # LoRA rank
-        lora_alpha=16,
-        lora_dropout=0.0,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-        bias="none"
-    )
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-
-    # Load and format dataset
-    dataset = load_training_data(training_data_path)
-    dataset = dataset.map(
-        lambda x: format_prompts(x, tokenizer),
-        batched=True,
-        remove_columns=dataset.column_names
+    val_loader = OptimizedDataLoader.create_dataloader(
+        val_dataset,
+        batch_size=batch_size * 2,  # Larger batch for validation
+        shuffle=False,
+        collate_fn=efficient_collate_fn
     )
 
-    # Training arguments optimized for CPU
-    print("\n⚙️  Setting up training...")
-    training_args = TrainingArguments(
-        output_dir=f"./data/checkpoints/{output_model_name}",
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        warmup_steps=10,
-        max_steps=200,
-        learning_rate=2e-4,
-        fp16=False,  # CPU doesn't support fp16
-        logging_steps=10,
-        save_strategy="steps",
-        save_steps=50,
-        save_total_limit=2,
-        dataloader_num_workers=0,  # Important for CPU
-        dataloader_pin_memory=False,  # No GPU, don't pin memory
+    # Model to device
+    model = model.to(device)
+
+    # Loss and optimizer
+    criterion = nn.CrossEntropyLoss()
+
+    # Use AdamW with carefully tuned parameters
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=learning_rate,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0.01
     )
 
-    # Data collator
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=False
+    # Cosine annealing with warm restarts
+    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=10,  # Restart every 10 epochs
+        T_mult=2,
+        eta_min=learning_rate * 0.01
     )
 
-    # Create trainer
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset,
-        data_collator=data_collator,
-    )
+    # Training history
+    history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
 
-    # Train
-    print("\n🏋️  Starting training...")
-    print("⏳ This will take 3-7 days on CPU. Go touch grass...")
-    trainer.train()
+    print("\n" + "="*70)
+    print("Starting Xeon-optimized training...")
+    print("="*70)
 
-    # Save LoRA adapters
-    print("\n💾 Saving LoRA adapters...")
-    model.save_pretrained(f"./data/models/{output_model_name}")
-    tokenizer.save_pretrained(f"./data/models/{output_model_name}")
+    total_start = time.time()
+    best_val_acc = 0
 
-    print(f"\n✅ Training complete!")
-    print(f"📁 Model saved to: ./data/models/{output_model_name}")
-    print(f"💡 Import to Ollama with the saved model files")
+    for epoch in range(num_epochs):
+        epoch_start = time.time()
 
-if __name__ == "__main__":
-    main()
+        # Train
+        train_loss, train_acc = train_epoch_xeon(
+            model, train_loader, criterion, optimizer, device,
+            epoch, num_epochs, accumulation_steps=2
+        )
+
+        # Validate
+        val_loss, val_acc = validate_xeon(model, val_loader, criterion, device)
+
+        # Update scheduler
+        scheduler.step()
+
+        # Save history
+        history['train_loss'].append(train_loss)
+        history['train_acc'].append(train_acc)
+        history['val_loss'].append(val_loss)
+        history['val_acc'].append(val_acc)
+
+        # Save best model
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_acc': val_acc,
+            }, f'best_model_xeon_epoch{epoch+1}_acc{val_acc:.1f}.pth')
+            print(f"✓ Saved best model with val_acc: {val_acc:.1f}%")
+
+        epoch_time = time.time() - epoch_start
+
+        print(f"\nEpoch {epoch+1}/{num_epochs} Summary:")
+        print(f"  Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.1f}%")
+        print(f"  Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.1f}%")
+        print(f"  Time: {epoch_time//60:.0f}m {epoch_time%60:.0f}s")
+        print(f"  Learning Rate: {scheduler.get_last_lr()[0]:.6f}")
+        print("-" * 50)
+
+        # Early stopping check (optional)
+        if epoch >= 20 and val_loss > np.mean(history['val_loss'][-5:]):
+            print("Early stopping triggered (validation loss plateau)")
+            break
+
+    total_time = time.time() - total_start
+    print(f"\n" + "="*70)
+    print(f"Training completed in {total_time//3600:.0f}h {(total_time%3600)//60:.0f}m")
+    print(f"Best validation accuracy: {best_val_acc:.1f}%")
+    print("="*70)
+
+    return model, history
+
+# ==================== MEMORY OPTIMIZATION UTILITIES ====================
+def optimize_model_memory(model):
+    """Apply memory optimizations to model"""
+    model.eval()
+
+    # Convert to half precision where possible
+    try:
+        model.half()
+        print("Model converted to half precision (float16)")
+    except:
+        print("Could not convert to half precision, using float32")
+
+    # Freeze early layers if applicable
+    for param in model.parameters():
+        param.requires_grad = True  # Keep all trainable for now
+
+    return model
+
+def clear_memory():
+    """Clear PyTorch and system memory"""
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
