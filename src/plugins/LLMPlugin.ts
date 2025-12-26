@@ -3,7 +3,7 @@ import type { BotPlugin, BotCommand } from '../types/index.js';
 import type { ExtensibleBot } from '../core/Bot.js';
 import messageStorageService from '../services/MessageStorageService.js';
 import vectorStoreService from '../services/VectorStoreService.js';
-import ollamaService from '../services/OllamaService.js';
+import modelInferenceService from '../services/ModelInferenceService.js';
 import fineTuningService from '../services/FineTuningService.js';
 import cron from 'node-cron';
 import { MessageGenerationConfig } from '../types/llm.js';
@@ -64,22 +64,16 @@ export class LLMPlugin implements BotPlugin {
 
     console.log('🤖 Initializing LLM Plugin...');
 
-    // Check Ollama connection
-    console.log('1️⃣  Checking Ollama connection...');
-    const ollamaConnected = await ollamaService.checkConnection();
-    if (!ollamaConnected) {
-      console.error('❌ Ollama is not running. Please start Ollama first: https://ollama.ai');
-      console.log('💡 After installing Ollama, run: ollama pull llama3.2:3b');
-      return;
-    }
-    console.log('✅ Ollama is connected');
-
-    // Ensure model exists
-    console.log('2️⃣  Checking if model exists...');
-    const modelExists = await ollamaService.ensureModelExists();
+    // Check if trained model exists
+    console.log('1️⃣  Checking for trained model...');
+    const modelExists = await modelInferenceService.checkModelExists();
     if (!modelExists) {
-      console.error('❌ Required model not found. Run: ollama pull llama3.2:3b');
-      return;
+      console.log('⚠️  No trained model found yet.');
+      console.log('💡 Train your model with: !llmtrain now');
+      console.log('   Model will be trained from scratch using YOUR Discord messages.');
+      console.log('   Bot will respond once training is complete.');
+    } else {
+      console.log('✅ Trained model loaded successfully');
     }
 
     // Initialize vector store (ChromaDB should already be ready)
@@ -134,8 +128,8 @@ export class LLMPlugin implements BotPlugin {
         return;
       }
 
-      // Generate a response using the LLM (this takes time)
-      const response = await ollamaService.generateMentionResponse(recentMessages, message.content, message.author.username);
+      // Generate a response using YOUR trained model (this takes time)
+      const response = await modelInferenceService.generateMentionResponse(recentMessages, message.content, message.author.username);
 
       await message.reply(response);
       console.log(`✅ Replied to mention from ${message.author.username}`);
@@ -310,7 +304,7 @@ export class LLMPlugin implements BotPlugin {
 
       // Generate message using LLM with RAG (passes channelId for vector search)
       console.log(`🤖 Generating message for #${channelName} (using RAG)...`);
-      const generatedContent = await ollamaService.generateMessage(recentMessages, channelName, channelId);
+      const generatedContent = await modelInferenceService.generateMessage(recentMessages, channelName, channelId);
 
       // Get the channel and send message
       const channel = await this.client.channels.fetch(channelId);
@@ -565,7 +559,7 @@ export class LLMPlugin implements BotPlugin {
       const totalMessages = messageStorageService.getTotalMessageCount();
       const vectorCount = await vectorStoreService.getCollectionCount();
       const activeChannels = messageStorageService.getActiveChannels();
-      const llmConfig = ollamaService.getConfig();
+      const llmConfig = modelInferenceService.getConfig();
       const trainingStatus = fineTuningService.getTrainingStatus();
 
       // Get current German time

@@ -19,9 +19,6 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama
-RUN curl -fsSL https://ollama.com/install.sh | sh
-
 # Install ChromaDB
 RUN python3 -m venv /opt/chromadb-venv && \
     /opt/chromadb-venv/bin/pip install --no-cache-dir chromadb
@@ -100,6 +97,6 @@ RUN chmod +x /usr/local/bin/wait-for-chromadb.sh
 
 COPY docker-supervisord.conf /etc/supervisor/supervisord.conf
 
-EXPOSE 11434 8000
+EXPOSE 8000
 
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

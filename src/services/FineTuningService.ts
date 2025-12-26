@@ -1,7 +1,6 @@
 import { promises as fs } from 'fs';
 import { spawn } from 'child_process';
 import messageStorageService from './MessageStorageService.js';
-import ollamaService from './OllamaService.js';
 
 export class FineTuningService {
   private isTraining = false;
@@ -233,28 +232,6 @@ export class FineTuningService {
     return outputPath;
   }
 
-  async createModelfile(baseModel: string): Promise<string> {
-    const modelVersion = this.modelVersion + 1;
-    const modelName = `${this.modelBaseName}-v${modelVersion}`;
-
-    // Get config from OllamaService (pulled from .env)
-    const config = ollamaService.getConfig();
-
-    const modelfileContent = `FROM ${baseModel}
-
-# Model parameters (from .env)
-PARAMETER temperature ${config.temperature}
-PARAMETER num_ctx ${config.contextWindow}
-
-# System prompt
-SYSTEM You are a member of this Discord server who knows everything that has been said in all channels. You have perfect memory of every conversation. Match the tone and style of the server. Be casual, authentic, and natural.
-`;
-
-    const modelfilePath = './data/Modelfile';
-    await fs.writeFile(modelfilePath, modelfileContent);
-
-    return modelfilePath;
-  }
 
   async startTraining(): Promise<void> {
     if (this.isTraining) {
