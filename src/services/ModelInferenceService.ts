@@ -177,7 +177,8 @@ export class ModelInferenceService {
     // Take first non-empty line if multi-line
     const lines = text.split('\n').filter(l => l.trim().length > 0);
     if (lines.length > 0) {
-      text = lines[0];
+      // @ts-ignore
+        text = lines[0];
     }
 
     // Final pass: remove any remaining fragments
