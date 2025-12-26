@@ -11,6 +11,17 @@ export class FineTuningService {
   private modelBaseName = 'krokenheimer';
   private modelVersion = 0;
 
+  // Training progress tracking
+  private trainingProgress = {
+    currentStep: 0,
+    totalSteps: 0,
+    currentEpoch: 0,
+    totalEpochs: 3,
+    currentLoss: 0,
+    startTime: 0,
+    phase: 'idle' as 'idle' | 'preparing' | 'training' | 'saving' | 'importing'
+  };
+
   constructor() {
     this.loadState();
   }
@@ -51,12 +62,82 @@ export class FineTuningService {
     return !this.isTraining && this.messagesSinceLastTrain >= this.trainingThreshold;
   }
 
-  getTrainingStatus(): { isTraining: boolean; messagesSinceLastTrain: number; threshold: number } {
+  getTrainingStatus(): {
+    isTraining: boolean;
+    messagesSinceLastTrain: number;
+    threshold: number;
+    progress: {
+      currentStep: number;
+      totalSteps: number;
+      currentEpoch: number;
+      totalEpochs: number;
+      currentLoss: number;
+      startTime: number;
+      phase: string;
+      percentComplete: number;
+      estimatedTimeRemaining: string;
+      elapsedTime: string;
+    };
+  } {
+    // Calculate progress percentage
+    const percentComplete = this.trainingProgress.totalSteps > 0
+      ? Math.round((this.trainingProgress.currentStep / this.trainingProgress.totalSteps) * 100)
+      : 0;
+
+    // Calculate elapsed time
+    const elapsedMs = this.trainingProgress.startTime > 0
+      ? Date.now() - this.trainingProgress.startTime
+      : 0;
+    const elapsedTime = this.formatDuration(elapsedMs);
+
+    // Estimate time remaining
+    let estimatedTimeRemaining = 'Calculating...';
+    if (this.trainingProgress.currentStep > 0 && this.trainingProgress.totalSteps > 0) {
+      const avgTimePerStep = elapsedMs / this.trainingProgress.currentStep;
+      const stepsRemaining = this.trainingProgress.totalSteps - this.trainingProgress.currentStep;
+      const remainingMs = avgTimePerStep * stepsRemaining;
+      estimatedTimeRemaining = this.formatDuration(remainingMs);
+    }
+
     return {
       isTraining: this.isTraining,
       messagesSinceLastTrain: this.messagesSinceLastTrain,
-      threshold: this.trainingThreshold
+      threshold: this.trainingThreshold,
+      progress: {
+        currentStep: this.trainingProgress.currentStep,
+        totalSteps: this.trainingProgress.totalSteps,
+        currentEpoch: this.trainingProgress.currentEpoch,
+        totalEpochs: this.trainingProgress.totalEpochs,
+        currentLoss: this.trainingProgress.currentLoss,
+        startTime: this.trainingProgress.startTime,
+        phase: this.trainingProgress.phase,
+        percentComplete,
+        estimatedTimeRemaining,
+        elapsedTime
+      }
     };
+  }
+
+  private formatDuration(ms: number): string {
+    if (ms === 0) return 'N/A';
+
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+
+    if (days > 0) {
+      const remainingHours = hours % 24;
+      return `${days}d ${remainingHours}h`;
+    } else if (hours > 0) {
+      const remainingMinutes = minutes % 60;
+      return `${hours}h ${remainingMinutes}m`;
+    } else if (minutes > 0) {
+      const remainingSeconds = seconds % 60;
+      return `${minutes}m ${remainingSeconds}s`;
+    } else {
+      return `${seconds}s`;
+    }
   }
 
   private async checkPythonEnvironment(): Promise<boolean> {
@@ -243,6 +324,17 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
 
             console.log(`🔥 Training ${modelName} with CPU LoRA...`);
 
+            // Initialize training progress
+            this.trainingProgress = {
+                currentStep: 0,
+                totalSteps: 0,
+                currentEpoch: 0,
+                totalEpochs: 3,
+                currentLoss: 0,
+                startTime: Date.now(),
+                phase: 'preparing'
+            };
+
             // Convert Ollama model to HuggingFace format
             const hfModel = this.ollamaToHuggingFace(baseModel);
 
@@ -271,20 +363,32 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
                 const text = data.toString();
                 stdout += text;
                 console.log(`   ${text.trim()}`);
+
+                // Parse training progress from output
+                this.parseTrainingProgress(text);
             });
 
             pythonProcess.stderr.on('data', (data) => {
                 const text = data.toString();
                 stderr += text;
                 console.log(`   ${text.trim()}`);
+
+                // Also check stderr for progress (HuggingFace Trainer logs to stderr)
+                this.parseTrainingProgress(text);
             });
 
             pythonProcess.on('close', async (code) => {
                 if (code === 0) {
                     console.log(`✅ Training complete!`);
 
+                    // Update phase to importing
+                    this.trainingProgress.phase = 'importing';
+
                     // Import into Ollama
                     await this.importModelToOllama(modelName);
+
+                    // Reset progress
+                    this.trainingProgress.phase = 'idle';
                     resolve();
                 } else {
                     console.error('❌ Training script failed!');
@@ -292,15 +396,60 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
                     console.error(stdout);
                     console.error('--- STDERR ---');
                     console.error(stderr);
+
+                    // Reset progress
+                    this.trainingProgress.phase = 'idle';
                     reject(new Error(`Training failed with code ${code}. Check logs above for details.`));
                 }
             });
 
             pythonProcess.on('error', (error) => {
                 console.error('❌ Failed to spawn Python process:', error);
+
+                // Reset progress
+                this.trainingProgress.phase = 'idle';
                 reject(new Error(`Failed to start training: ${error.message}`));
             });
         });
+    }
+
+    private parseTrainingProgress(text: string): void {
+        // Check for phase changes
+        if (text.includes('STARTING TRAINING')) {
+            this.trainingProgress.phase = 'training';
+        } else if (text.includes('Training samples:')) {
+            // Extract total steps estimate: samples / batch_size / gradient_accumulation
+            const match = text.match(/Training samples:\s*(\d+)/);
+            if (match) {
+                // @ts-ignore
+                const samples = parseInt(match[1]);
+                // batch_size=1, gradient_accumulation=8, epochs=3
+                this.trainingProgress.totalSteps = Math.ceil((samples / 8) * 3);
+            }
+        } else if (text.includes('Saving model')) {
+            this.trainingProgress.phase = 'saving';
+        }
+
+        // Parse HuggingFace Trainer progress logs
+        // Format: {'loss': 2.5, 'learning_rate': 0.0001, 'epoch': 0.5, 'step': 10}
+        const progressMatch = text.match(/\{'loss':\s*([\d.]+).*?'epoch':\s*([\d.]+).*?'step':\s*(\d+)/);
+        if (progressMatch) {
+            // @ts-ignore
+            this.trainingProgress.currentLoss = parseFloat(progressMatch[1]);
+            // @ts-ignore
+            this.trainingProgress.currentEpoch = parseFloat(progressMatch[2]);
+            // @ts-ignore
+            this.trainingProgress.currentStep = parseInt(progressMatch[3]);
+        }
+
+        // Also handle progress bar format: [123/456 12:34 < 45:67, 1.23 it/s]
+        const progressBarMatch = text.match(/\[(\d+)\/(\d+)/);
+        if (progressBarMatch) {
+            // @ts-ignore
+            this.trainingProgress.currentStep = parseInt(progressBarMatch[1]);
+            // @ts-ignore
+            this.trainingProgress.totalSteps = parseInt(progressBarMatch[2]);
+        }
     }
 
   private ollamaToHuggingFace(ollamaModel: string): string {

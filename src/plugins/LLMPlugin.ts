@@ -628,7 +628,7 @@ ${channelList}
       const status = fineTuningService.getTrainingStatus();
       const totalMessages = messageStorageService.getTotalMessageCount();
 
-      const statusText = `
+      let statusText = `
 **🎓 Training Status**
 
 • Current model: ${fineTuningService.getCurrentModelName()}
@@ -636,7 +636,27 @@ ${channelList}
 • Messages since last train: ${status.messagesSinceLastTrain}/${status.threshold}
 • Progress to next train: ${Math.round((status.messagesSinceLastTrain / status.threshold) * 100)}%
 • Training status: ${status.isTraining ? '🔄 In progress...' : '✅ Idle'}
+`;
 
+      // If training is in progress, show detailed progress
+      if (status.isTraining && status.progress.phase !== 'idle') {
+        const progress = status.progress;
+        const progressBar = this.createProgressBar(progress.percentComplete, 20);
+
+        statusText += `
+**📊 Training Progress**
+
+• Phase: ${this.getPhaseEmoji(progress.phase)} ${progress.phase}
+• Step: ${progress.currentStep}/${progress.totalSteps}
+• Epoch: ${progress.currentEpoch.toFixed(2)}/${progress.totalEpochs}
+• Loss: ${progress.currentLoss > 0 ? progress.currentLoss.toFixed(4) : 'N/A'}
+• Progress: ${progressBar} ${progress.percentComplete}%
+• Elapsed time: ${progress.elapsedTime}
+• Estimated remaining: ${progress.estimatedTimeRemaining}
+`;
+      }
+
+      statusText += `
 **Usage:**
 \`!llmtrain now\` - Start training immediately
 \`!llmtrain status\` - Show this status
@@ -653,7 +673,7 @@ ${channelList}
       const status = fineTuningService.getTrainingStatus();
 
       if (status.isTraining) {
-        await message.reply('⚠️  Training is already in progress!');
+        await message.reply('⚠️  Training is already in progress! Use `!llmtrain status` to check progress.');
         return;
       }
 
@@ -663,7 +683,7 @@ ${channelList}
         return;
       }
 
-      await message.reply(`🚀 Starting training with ${totalMessages} messages...\n⏳ This will take 3-7 days on CPU. Bot will continue working normally.`);
+      await message.reply(`🚀 Starting training with ${totalMessages} messages...\n⏳ This will take 3-7 days on CPU. Bot will continue working normally.\n💡 Use \`!llmtrain status\` to check progress.`);
 
       // Start training in background
       fineTuningService.startTraining().catch(err => {
@@ -673,6 +693,23 @@ ${channelList}
     } else {
       await message.reply('❌ Unknown command. Use `!llmtrain now` or `!llmtrain status`');
     }
+  }
+
+  private createProgressBar(percent: number, width: number): string {
+    const filled = Math.round((percent / 100) * width);
+    const empty = width - filled;
+    return '█'.repeat(filled) + '░'.repeat(empty);
+  }
+
+  private getPhaseEmoji(phase: string): string {
+    const emojis: Record<string, string> = {
+      'idle': '💤',
+      'preparing': '📝',
+      'training': '🔥',
+      'saving': '💾',
+      'importing': '📦'
+    };
+    return emojis[phase] || '❓';
   }
 
   async cleanup(): Promise<void> {
