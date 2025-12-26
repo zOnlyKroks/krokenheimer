@@ -306,26 +306,51 @@ export class FineTuningService {
 
             console.log(`   Training data: ${trainingDataPath}`);
 
-            // Check if we have a checkpoint to resume from
+            // Check if we have a completed model to resume from (for incremental training)
             const modelDir = `./data/models/${modelName}`;
             let resumeCheckpoint = null;
 
             try {
-                const checkpoints = await fs.readdir(modelDir);
-                const checkpointDirs = checkpoints.filter(f => f.startsWith('checkpoint-'));
+                // Check if completed model exists (has config.json)
+                await fs.access(`${modelDir}/config.json`);
 
-                if (checkpointDirs.length > 0) {
-                    // Get latest checkpoint
-                    checkpointDirs.sort((a, b) => {
-                        const numA = parseInt(a.replace('checkpoint-', ''));
-                        const numB = parseInt(b.replace('checkpoint-', ''));
-                        return numB - numA;
-                    });
-                    resumeCheckpoint = `${modelDir}/${checkpointDirs[0]}`;
-                    console.log(`📂 Resuming from checkpoint: ${checkpointDirs[0]}`);
+                // Completed model exists - use it for incremental training
+                resumeCheckpoint = modelDir;
+                console.log(`📂 Resuming incremental training from completed model`);
+
+                // Clean up old checkpoints to save space and prevent confusion
+                try {
+                    const files = await fs.readdir(modelDir);
+                    const checkpointDirs = files.filter(f => f.startsWith('checkpoint-'));
+
+                    if (checkpointDirs.length > 0) {
+                        console.log(`🧹 Cleaning up ${checkpointDirs.length} old checkpoints...`);
+                        for (const checkpoint of checkpointDirs) {
+                            await fs.rm(`${modelDir}/${checkpoint}`, { recursive: true, force: true });
+                        }
+                    }
+                } catch (cleanupError) {
+                    console.log('⚠️  Could not clean up checkpoints:', cleanupError);
                 }
             } catch (error) {
-                console.log('📝 Starting fresh training (no checkpoint found)');
+                // No completed model, check for intermediate checkpoints
+                try {
+                    const checkpoints = await fs.readdir(modelDir);
+                    const checkpointDirs = checkpoints.filter(f => f.startsWith('checkpoint-'));
+
+                    if (checkpointDirs.length > 0) {
+                        // Get latest checkpoint
+                        checkpointDirs.sort((a, b) => {
+                            const numA = parseInt(a.replace('checkpoint-', ''));
+                            const numB = parseInt(b.replace('checkpoint-', ''));
+                            return numB - numA;
+                        });
+                        resumeCheckpoint = `${modelDir}/${checkpointDirs[0]}`;
+                        console.log(`📂 Resuming from incomplete checkpoint: ${checkpointDirs[0]}`);
+                    }
+                } catch (checkpointError) {
+                    console.log('📝 Starting fresh training (no model or checkpoint found)');
+                }
             }
 
             // Run the from-scratch training script
@@ -383,6 +408,22 @@ export class FineTuningService {
                 if (code === 0) {
                     console.log(`✅ Training complete!`);
                     console.log(`📦 Model saved to: ${modelDir}`);
+
+                    // Clean up intermediate checkpoints after successful training
+                    try {
+                        const files = await fs.readdir(modelDir);
+                        const checkpointDirs = files.filter(f => f.startsWith('checkpoint-'));
+
+                        if (checkpointDirs.length > 0) {
+                            console.log(`🧹 Cleaning up ${checkpointDirs.length} intermediate checkpoints...`);
+                            for (const checkpoint of checkpointDirs) {
+                                await fs.rm(`${modelDir}/${checkpoint}`, { recursive: true, force: true });
+                            }
+                            console.log('✓ Checkpoints cleaned up');
+                        }
+                    } catch (cleanupError) {
+                        console.log('⚠️  Could not clean up checkpoints:', cleanupError);
+                    }
 
                     // Reset progress
                     this.trainingProgress.phase = 'idle';
