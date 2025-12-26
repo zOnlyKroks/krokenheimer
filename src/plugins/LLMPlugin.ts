@@ -606,7 +606,12 @@ export class LLMPlugin implements BotPlugin {
       const currentHour = germanDate.getHours();
       const isActiveHours = currentHour >= 8 && currentHour < 24;
 
-      const channelList = activeChannels
+      // Filter out excluded channels from stats
+      const filteredChannels = activeChannels.filter(ch =>
+        !trainingConfig.isChannelExcluded(ch.channelId)
+      );
+
+      const channelList = filteredChannels
         .slice(0, 10)
         .map(ch => `• #${ch.channelName}: ${ch.count} messages`)
         .join('\n');
