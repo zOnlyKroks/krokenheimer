@@ -237,74 +237,71 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
     }
   }
 
-  private async trainWithUnsloth(baseModel: string, trainingDataPath: string): Promise<void> {
-    return new Promise(async (resolve, reject) => {
-      const modelName = `${this.modelBaseName}-v${this.modelVersion + 1}`;
+    private async trainWithUnsloth(baseModel: string, trainingDataPath: string): Promise<void> {
+        return new Promise(async (resolve, reject) => {
+            const modelName = `${this.modelBaseName}-v${this.modelVersion + 1}`;
 
-      console.log(`🔥 Training ${modelName} with Unsloth LoRA...`);
-      console.log(`   This performs TRUE fine-tuning on model weights`);
+            console.log(`🔥 Training ${modelName} with CPU LoRA...`);
 
-      // Convert Ollama model name to HuggingFace format
-      // e.g., llama3.2:3b -> unsloth/Llama-3.2-3B-Instruct
-      const hfModel = this.ollamaToHuggingFace(baseModel);
+            // Convert Ollama model to HuggingFace format
+            const hfModel = this.ollamaToHuggingFace(baseModel);
 
-      console.log(`   Base model: ${hfModel}`);
-      console.log(`   Training data: ${trainingDataPath}`);
+            console.log(`   Base model: ${hfModel}`);
+            console.log(`   Training data: ${trainingDataPath}`);
 
-      // Run Python training script (use venv if available)
-      const pythonCmd = await fs.access('./venv/bin/python3')
-        .then(() => './venv/bin/python3')
-        .catch(() => 'python3');
+            // Run the CORRECT training script
+            const pythonCmd = await fs.access('./venv/bin/python3')
+                .then(() => './venv/bin/python3')
+                .catch(() => 'python3');
 
-      console.log(`   Python: ${pythonCmd}`);
+            console.log(`   Python: ${pythonCmd}`);
 
-      const pythonProcess = spawn(pythonCmd, [
-        './scripts/train_unsloth.py',
-        hfModel,
-        trainingDataPath,
-        modelName
-      ]);
+            // Use the text LoRA training script
+            const pythonProcess = spawn(pythonCmd, [
+                './scripts/train_text_lora.py',
+                hfModel,
+                trainingDataPath,
+                modelName
+            ]);
 
-      let stdout = '';
-      let stderr = '';
+            let stdout = '';
+            let stderr = '';
 
-      pythonProcess.stdout.on('data', (data) => {
-        const text = data.toString();
-        stdout += text;
-        console.log(`   ${text.trim()}`);
-      });
+            pythonProcess.stdout.on('data', (data) => {
+                const text = data.toString();
+                stdout += text;
+                console.log(`   ${text.trim()}`);
+            });
 
-      pythonProcess.stderr.on('data', (data) => {
-        const text = data.toString();
-        stderr += text;
-        // Python prints progress to stderr too
-        console.log(`   ${text.trim()}`);
-      });
+            pythonProcess.stderr.on('data', (data) => {
+                const text = data.toString();
+                stderr += text;
+                console.log(`   ${text.trim()}`);
+            });
 
-      pythonProcess.on('close', async (code) => {
-        if (code === 0) {
-          console.log(`✅ Training complete!`);
+            pythonProcess.on('close', async (code) => {
+                if (code === 0) {
+                    console.log(`✅ Training complete!`);
 
-          // Import GGUF into Ollama
-          await this.importGGUFToOllama(modelName);
+                    // Import into Ollama
+                    await this.importModelToOllama(modelName);
+                    resolve();
+                } else {
+                    console.error('❌ Training script failed!');
+                    console.error('--- STDOUT ---');
+                    console.error(stdout);
+                    console.error('--- STDERR ---');
+                    console.error(stderr);
+                    reject(new Error(`Training failed with code ${code}. Check logs above for details.`));
+                }
+            });
 
-          resolve();
-        } else {
-          console.error('❌ Training script failed!');
-          console.error('--- STDOUT ---');
-          console.error(stdout);
-          console.error('--- STDERR ---');
-          console.error(stderr);
-          reject(new Error(`Training failed with code ${code}. Check logs above for details.`));
-        }
-      });
-
-      pythonProcess.on('error', (error) => {
-        console.error('❌ Failed to spawn Python process:', error);
-        reject(new Error(`Failed to start training: ${error.message}`));
-      });
-    });
-  }
+            pythonProcess.on('error', (error) => {
+                console.error('❌ Failed to spawn Python process:', error);
+                reject(new Error(`Failed to start training: ${error.message}`));
+            });
+        });
+    }
 
   private ollamaToHuggingFace(ollamaModel: string): string {
     // Map to OPEN models (no authentication required)
@@ -320,47 +317,49 @@ SYSTEM You are a member of this Discord server who knows everything that has bee
     return modelMap[ollamaModel] || 'TinyLlama/TinyLlama-1.1B-Chat-v1.0';  // Default to TinyLlama (1.1B, fully open)
   }
 
-  private async importGGUFToOllama(modelName: string): Promise<void> {
-    console.log(`📦 Importing trained model into Ollama...`);
+    private async importModelToOllama(modelName: string): Promise<void> {
+        console.log(`📦 Importing trained model into Ollama...`);
 
-    const ggufPath = `./data/models/${modelName}/*.gguf`;
+        const modelDir = `./data/models/${modelName}`;
+        const modelfilePath = `${modelDir}/Modelfile`;
 
-    // Create Modelfile that references the GGUF
-    const config = ollamaService.getConfig();
+        // Check if Modelfile exists, create if not
+        try {
+            await fs.access(modelfilePath);
+        } catch {
+            // Create simple Modelfile
+            const config = ollamaService.getConfig();
+            const modelfileContent = `FROM ${modelDir}
 
-    const modelfileContent = `FROM ${ggufPath}
-
-# Model parameters (from .env)
 PARAMETER temperature ${config.temperature}
 PARAMETER num_ctx ${config.contextWindow}
 
-# System prompt
-SYSTEM You are a member of this Discord server who knows everything that has been said in all channels. You have perfect memory of every conversation. Match the tone and style of the server. Be casual, authentic, and natural.
-`;
+SYSTEM You are a member of this Discord server who knows everything that has been said in all channels. You have perfect memory of every conversation. Match the tone and style of the server.`;
 
-    await fs.writeFile('./data/Modelfile-trained', modelfileContent);
-
-    return new Promise((resolve, reject) => {
-      const importProcess = spawn('ollama', ['create', modelName, '-f', './data/Modelfile-trained']);
-
-      importProcess.stdout.on('data', (data) => {
-        console.log(`   ${data.toString().trim()}`);
-      });
-
-      importProcess.stderr.on('data', (data) => {
-        console.error(`   ${data.toString().trim()}`);
-      });
-
-      importProcess.on('close', (code) => {
-        if (code === 0) {
-          console.log(`✅ Model ${modelName} imported to Ollama!`);
-          resolve();
-        } else {
-          reject(new Error(`Ollama import failed with code ${code}`));
+            await fs.writeFile(modelfilePath, modelfileContent);
         }
-      });
-    });
-  }
+
+        return new Promise((resolve, reject) => {
+            const importProcess = spawn('ollama', ['create', modelName, '-f', modelfilePath]);
+
+            importProcess.stdout.on('data', (data) => {
+                console.log(`   ${data.toString().trim()}`);
+            });
+
+            importProcess.stderr.on('data', (data) => {
+                console.error(`   ${data.toString().trim()}`);
+            });
+
+            importProcess.on('close', (code) => {
+                if (code === 0) {
+                    console.log(`✅ Model ${modelName} imported to Ollama!`);
+                    resolve();
+                } else {
+                    reject(new Error(`Ollama import failed with code ${code}`));
+                }
+            });
+        });
+    }
 
   async switchToNewModel(): Promise<void> {
     const newModelName = `${this.modelBaseName}-v${this.modelVersion}`;
