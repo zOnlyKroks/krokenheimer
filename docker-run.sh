@@ -49,12 +49,8 @@ docker run -d \
     -e LLM_MIN_INTERVAL_MINUTES="${LLM_MIN_INTERVAL_MINUTES:-60}" \
     -e LLM_MAX_INTERVAL_MINUTES="${LLM_MAX_INTERVAL_MINUTES:-180}" \
     -e LLM_SCAN_INTERVAL_MINUTES="${LLM_SCAN_INTERVAL_MINUTES:-2}" \
-    -e OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.2:3b}" \
-    -e OLLAMA_TEMPERATURE="${OLLAMA_TEMPERATURE:-0.9}" \
-    -e OLLAMA_MAX_TOKENS="${OLLAMA_MAX_TOKENS:-200}" \
     -v "$(pwd)/data:/app/data" \
     -v "$(pwd)/chroma_data:/app/chroma_data" \
-    -v krokenheimer_ollama_models:/root/.ollama \
     krokenheimer-bot
 
 if [ $? -eq 0 ]; then
@@ -66,7 +62,6 @@ if [ $? -eq 0 ]; then
     echo "   Stop:           docker stop krokenheimer-bot"
     echo "   Restart:        docker restart krokenheimer-bot"
     echo "   Shell access:   docker exec -it krokenheimer-bot bash"
-    echo "   Pull model:     docker exec krokenheimer-bot ollama pull llama3.2:3b"
     echo ""
     echo "Showing logs (Ctrl+C to exit, container keeps running)..."
     sleep 2

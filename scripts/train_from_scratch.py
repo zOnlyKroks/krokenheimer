@@ -192,10 +192,25 @@ def main():
         print(f"✓ Tokenizer vocabulary size: {len(tokenizer)} (learned from YOUR messages)")
         print(f"✓ Special tokens: {tokenizer.all_special_tokens}")
 
+        # Check if resuming from checkpoint or completed model
+        resume_checkpoint_for_trainer = None
+
         if args.resume:
-            # Resume from checkpoint
-            print(f"📂 Loading model from checkpoint: {args.resume}")
-            model = GPT2LMHeadModel.from_pretrained(args.resume)
+            # Check if this is a checkpoint (has trainer_state.json) or completed model
+            trainer_state_path = os.path.join(args.resume, 'trainer_state.json')
+            is_checkpoint = os.path.exists(trainer_state_path)
+
+            if is_checkpoint:
+                # Resume from incomplete checkpoint - can use Trainer's resume feature
+                print(f"📂 Resuming from incomplete checkpoint: {args.resume}")
+                resume_checkpoint_for_trainer = args.resume
+                model = GPT2LMHeadModel.from_pretrained(args.resume)
+            else:
+                # Load from completed model - incremental training
+                print(f"📂 Loading completed model for incremental training: {args.resume}")
+                print("   (Starting fresh training on new data with existing weights)")
+                model = GPT2LMHeadModel.from_pretrained(args.resume)
+
             # Ensure model uses correct vocab size
             if model.config.vocab_size != len(tokenizer):
                 print(f"⚠️  Resizing model embeddings: {model.config.vocab_size} -> {len(tokenizer)}")
@@ -316,7 +331,9 @@ def main():
     start_time = time.time()
 
     try:
-        train_result = trainer.train(resume_from_checkpoint=args.resume)
+        # Only pass checkpoint to trainer if it has trainer_state.json
+        # For completed models, we load the weights but start fresh training
+        train_result = trainer.train(resume_from_checkpoint=resume_checkpoint_for_trainer)
 
         # Save final model
         print("\n💾 Saving final model...")
