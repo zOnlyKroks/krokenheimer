@@ -2,6 +2,12 @@
 """
 CPU-Optimized LoRA Fine-Tuning for Text Models
 For Xeon 8-core/16-thread with 32GB RAM
+
+IMPORTANT: For long-running training, use tmux or screen to prevent SSH disconnects:
+    tmux new -s training
+    python3 scripts/train_text_lora.py [args]
+    # Detach: Ctrl+B, then D
+    # Reattach: tmux attach -t training
 """
 
 import torch
@@ -18,6 +24,18 @@ import time
 # ==================== XEON CPU OPTIMIZATION ====================
 def setup_xeon_environment():
     """Optimize for Xeon 8-core/16-thread CPU"""
+    # Set process priority to prevent SSH disconnects
+    try:
+        import psutil
+        p = psutil.Process()
+        p.nice(10)  # Lower priority to keep system responsive
+        print("✓ Process priority set to nice=10 (prevents SSH disconnects)")
+    except ImportError:
+        print("⚠️  psutil not installed - cannot set CPU priority")
+        print("   Install with: pip install psutil")
+    except Exception as e:
+        print(f"⚠️  Could not set process priority: {e}")
+
     # Set thread pools
     os.environ['OMP_NUM_THREADS'] = '8'
     os.environ['MKL_NUM_THREADS'] = '8'
@@ -146,13 +164,12 @@ def main():
     # Format conversations
     formatted_texts = [format_conversation(ex) for ex in raw_data]
 
-    # Tokenize
+    # Tokenize (use dynamic padding via data collator for efficiency)
     def tokenize_function(examples):
         return tokenizer(
             examples["text"],
             truncation=True,
-            padding="max_length",
-            max_length=512  # Adjust based on your context
+            max_length=256  # Reduced for faster CPU training (was 512)
         )
 
     # Create dataset
@@ -172,17 +189,17 @@ def main():
 
     training_args = TrainingArguments(
         output_dir=f"./data/models/{args.output_name}",
-        num_train_epochs=3,  # Start small
+        num_train_epochs=1,  # Reduced from 3 for faster testing
         per_device_train_batch_size=1,  # Small batch for CPU
         per_device_eval_batch_size=1,
-        gradient_accumulation_steps=8,  # Simulate batch size of 8
-        warmup_steps=100,
-        logging_steps=10,
+        gradient_accumulation_steps=4,  # Reduced from 8 for faster iterations
+        warmup_steps=50,  # Reduced from 100
+        logging_steps=5,  # Increased frequency for better progress visibility
         save_steps=100,
         eval_steps=100,
         evaluation_strategy="steps",
         save_strategy="steps",
-        learning_rate=1e-4,
+        learning_rate=2e-4,  # Slightly higher for faster convergence
         weight_decay=0.01,
         fp16=False,  # False for CPU
         bf16=False,   # False for CPU
@@ -191,6 +208,8 @@ def main():
         report_to="none",
         push_to_hub=False,
         gradient_checkpointing=False,  # Too slow on CPU
+        dataloader_num_workers=0,  # Single-threaded for CPU stability
+        disable_tqdm=False,  # Show progress bar
     )
 
     # Data collator
