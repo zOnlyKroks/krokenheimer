@@ -43,6 +43,7 @@ RUN python3 -m venv /opt/training-venv && \
     trl \
     datasets \
     accelerate \
+    torchvision \
     peft
 
 # Verify installation
