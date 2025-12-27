@@ -149,7 +149,7 @@ export class LLMPlugin implements BotPlugin {
 
       // If not enough context, use a simple response
       if (recentMessages.length < 5) {
-        await message.reply('Hey! I need to learn more from this channel before I can have a proper conversation. Give me some time to collect messages!');
+        await message.reply('Hey! I need more conversation history in this channel to give you a relevant response. Keep chatting and try again in a bit!');
         return;
       }
 
@@ -159,7 +159,7 @@ export class LLMPlugin implements BotPlugin {
       // Validate response is not empty
       if (!response || response.trim().length === 0) {
         console.warn('⚠️  Model generated empty response, using fallback');
-        await message.reply('Hmm, I\'m not sure what to say right now. Still learning!');
+        await message.reply('Hmm, I\'m not sure what to say right now. My model might need retraining with more data!');
         return;
       }
 
@@ -175,7 +175,7 @@ export class LLMPlugin implements BotPlugin {
 
       if (error instanceof Error) {
         if (error.message.includes('Generation failed')) {
-          errorMessage = 'I tried to respond but couldn\'t generate a meaningful reply. This might be because I haven\'t learned enough from this channel yet.';
+          errorMessage = 'I tried to respond but couldn\'t generate a meaningful reply. My model might need more training data overall - try `!llmtrain now` after collecting more messages across all channels.';
         } else if (error.message.includes('Model not found')) {
           errorMessage = 'My AI model hasn\'t been trained yet. Ask an admin to run `!llmtrain now` first!';
         }

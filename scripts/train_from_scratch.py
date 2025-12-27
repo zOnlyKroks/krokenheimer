@@ -94,12 +94,73 @@ def format_conversation(example: Dict) -> str:
     formatted += "<|endoftext|>"
     return formatted.strip()
 
+def calculate_dynamic_params(num_samples: int, is_resuming: bool = False) -> Dict:
+    """
+    Dynamically adjust training parameters based on dataset size
+
+    Args:
+        num_samples: Number of training samples
+        is_resuming: Whether this is resuming from checkpoint
+
+    Returns:
+        Dict of optimized hyperparameters
+    """
+    print("\n🔧 Calculating dynamic training parameters...")
+
+    # Base parameters
+    params = {
+        'learning_rate': 2e-5,
+        'weight_decay': 0.05,
+        'warmup_steps': 200,
+        'gradient_accumulation_steps': 8,
+        'epochs': 10
+    }
+
+    # Adjust based on dataset size
+    if num_samples < 1000:
+        # Very small dataset - risk of overfitting
+        params['learning_rate'] = 1e-5  # Lower LR
+        params['weight_decay'] = 0.1    # Higher regularization
+        params['epochs'] = 5            # Fewer epochs
+        print("   📉 Small dataset detected - using conservative parameters")
+    elif num_samples < 5000:
+        # Medium dataset
+        params['learning_rate'] = 2e-5
+        params['weight_decay'] = 0.05
+        params['epochs'] = 10
+        print("   📊 Medium dataset - using balanced parameters")
+    else:
+        # Large dataset - can train more aggressively
+        params['learning_rate'] = 5e-5  # Higher LR
+        params['weight_decay'] = 0.01   # Lower regularization
+        params['epochs'] = 15           # More epochs
+        params['warmup_steps'] = 500    # More warmup
+        print("   📈 Large dataset - using aggressive parameters")
+
+    # Adjust warmup based on dataset size
+    params['warmup_steps'] = min(params['warmup_steps'], num_samples // 5)
+
+    # If resuming, use slightly lower LR for fine-tuning
+    if is_resuming:
+        params['learning_rate'] = params['learning_rate'] * 0.5
+        print("   🔄 Resuming training - halving learning rate for stability")
+
+    print(f"   → Learning rate: {params['learning_rate']}")
+    print(f"   → Weight decay: {params['weight_decay']}")
+    print(f"   → Warmup steps: {params['warmup_steps']}")
+    print(f"   → Gradient accumulation: {params['gradient_accumulation_steps']}")
+    print(f"   → Epochs: {params['epochs']}")
+
+    return params
+
 def main():
     parser = argparse.ArgumentParser(description='Train GPT-2 from scratch on Discord messages')
     parser.add_argument('training_data', type=str, help='Path to training data JSONL')
     parser.add_argument('output_name', type=str, help='Output model name')
     parser.add_argument('--resume', type=str, help='Path to checkpoint to resume from', default=None)
-    parser.add_argument('--epochs', type=int, help='Number of epochs', default=10)
+    parser.add_argument('--epochs', type=int, help='Number of epochs (auto if not specified)', default=10)
+    parser.add_argument('--learning-rate', type=float, help='Override learning rate (auto if not specified)', default=None)
+    parser.add_argument('--weight-decay', type=float, help='Override weight decay (auto if not specified)', default=None)
 
     args = parser.parse_args()
 
@@ -240,12 +301,14 @@ def main():
     # Format conversations
     formatted_texts = [format_conversation(ex) for ex in raw_data]
 
-    # Tokenize
+    # Tokenize (using fast tokenizer's optimized __call__ method)
     def tokenize_function(examples):
         return tokenizer(
             examples["text"],
             truncation=True,
-            max_length=512
+            max_length=512,
+            padding="max_length",  # Handle padding in one call (faster)
+            return_tensors=None     # Return dict for Dataset compatibility
         )
 
     # Create dataset
@@ -260,25 +323,42 @@ def main():
     print(f"  Training samples: {len(train_dataset)}")
     print(f"  Validation samples: {len(eval_dataset)}")
 
-    # Training arguments optimized for CPU
-    print("🎯 Setting up training...")
+    # Calculate dynamic training parameters based on dataset size
+    dynamic_params = calculate_dynamic_params(
+        num_samples=len(train_dataset),
+        is_resuming=(args.resume is not None)
+    )
+
+    # Apply manual overrides if provided
+    if args.learning_rate is not None:
+        dynamic_params['learning_rate'] = args.learning_rate
+        print(f"   ⚙️  Manual override: learning_rate = {args.learning_rate}")
+    if args.weight_decay is not None:
+        dynamic_params['weight_decay'] = args.weight_decay
+        print(f"   ⚙️  Manual override: weight_decay = {args.weight_decay}")
+
+    # Training arguments optimized for CPU with dynamic parameters
+    print("\n🎯 Setting up training with dynamic parameters...")
 
     output_dir = f"./data/models/{args.output_name}"
 
+    # Use dynamic epochs if not explicitly specified
+    num_epochs = args.epochs if args.epochs != 10 else dynamic_params['epochs']
+
     training_args = TrainingArguments(
         output_dir=output_dir,
-        num_train_epochs=args.epochs,
+        num_train_epochs=num_epochs,
         per_device_train_batch_size=1,
         per_device_eval_batch_size=1,
-        gradient_accumulation_steps=8,  # Increased from 4 for better gradient estimates
-        warmup_steps=200,  # Increased warmup for stability
+        gradient_accumulation_steps=dynamic_params['gradient_accumulation_steps'],
+        warmup_steps=dynamic_params['warmup_steps'],
         logging_steps=10,
         save_steps=500,  # Save checkpoints frequently for resume
         eval_steps=500,
         evaluation_strategy="steps",
         save_strategy="steps",
-        learning_rate=2e-5,  # Lower LR for more stable training (was 5e-5)
-        weight_decay=0.05,  # Increased regularization to prevent overfitting (was 0.01)
+        learning_rate=dynamic_params['learning_rate'],
+        weight_decay=dynamic_params['weight_decay'],
         max_grad_norm=1.0,  # Gradient clipping for stability
         fp16=False,
         bf16=False,
@@ -294,10 +374,11 @@ def main():
         metric_for_best_model="eval_loss",
     )
 
-    # Data collator
+    # Data collator (padding already done in tokenize_function)
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
-        mlm=False
+        mlm=False,
+        pad_to_multiple_of=None  # No additional padding needed
     )
 
     # Create trainer
