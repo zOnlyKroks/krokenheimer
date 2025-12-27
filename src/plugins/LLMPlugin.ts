@@ -130,6 +130,14 @@ export class LLMPlugin implements BotPlugin {
     try {
       console.log(`🔔 Bot mentioned by ${message.author.username} in #${message.channel.isDMBased() ? 'DM' : (message.channel as TextChannel).name}`);
 
+      // Check if channel is excluded from learning
+      if (trainingConfig.isChannelExcluded(message.channel.id)) {
+        const channelName = message.channel.isDMBased() ? 'DM' : (message.channel as TextChannel).name;
+        console.log(`⚠️  Mention ignored - #${channelName} is excluded from training`);
+        await message.reply('Sorry, I don\'t respond in this channel because it\'s excluded from my training.');
+        return;
+      }
+
       // Show typing indicator
       if ('sendTyping' in message.channel) {
         await message.channel.sendTyping().catch(() => {});
@@ -159,8 +167,21 @@ export class LLMPlugin implements BotPlugin {
       console.log(`✅ Replied to mention from ${message.author.username}`);
 
     } catch (error) {
-      console.error('Failed to handle mention:', error);
-      await message.reply('Sorry, I encountered an error trying to respond. Please try again later!').catch(() => {});
+      const channelName = message.channel.isDMBased() ? 'DM' : (message.channel as TextChannel).name;
+      console.error(`Failed to handle mention in #${channelName}:`, error);
+
+      // Provide helpful error message based on error type
+      let errorMessage = 'Sorry, I encountered an error trying to respond.';
+
+      if (error instanceof Error) {
+        if (error.message.includes('Generation failed')) {
+          errorMessage = 'I tried to respond but couldn\'t generate a meaningful reply. This might be because I haven\'t learned enough from this channel yet.';
+        } else if (error.message.includes('Model not found')) {
+          errorMessage = 'My AI model hasn\'t been trained yet. Ask an admin to run `!llmtrain now` first!';
+        }
+      }
+
+      await message.reply(errorMessage).catch(() => {});
     }
   }
 
@@ -172,6 +193,11 @@ export class LLMPlugin implements BotPlugin {
 
     // Skip command messages
     if (message.content.startsWith('!')) {
+      return;
+    }
+
+    // Skip messages from excluded channels
+    if (trainingConfig.isChannelExcluded(message.channel.id)) {
       return;
     }
 
@@ -263,6 +289,11 @@ export class LLMPlugin implements BotPlugin {
 
       // Filter channels based on config
       let eligibleChannels = activeChannels;
+
+      // Filter out excluded channels from trainingConfig
+      eligibleChannels = eligibleChannels.filter(ch =>
+        !trainingConfig.isChannelExcluded(ch.channelId)
+      );
 
       if (this.config.channelIds && this.config.channelIds.length > 0) {
         eligibleChannels = eligibleChannels.filter(ch =>
@@ -432,7 +463,13 @@ export class LLMPlugin implements BotPlugin {
         for (const [, channel] of channels) {
           if (!channel.isTextBased()) continue;
 
-          // Check if channel should be excluded
+          // Check if channel should be excluded (using trainingConfig)
+          if (trainingConfig.isChannelExcluded(channel.id)) {
+            console.log(`  ⏭️  Skipping excluded channel #${(channel as TextChannel).name}`);
+            continue;
+          }
+
+          // Legacy check for config-based exclusions
           if (this.config.excludeChannelIds?.includes(channel.id)) {
             continue;
           }
