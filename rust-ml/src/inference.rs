@@ -22,7 +22,7 @@ impl InferenceService {
         // Load tokenizer
         let tokenizer_path = Path::new(model_path).join("tokenizer.json");
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
-            .with_context(|| format!("Failed to load tokenizer from {}", tokenizer_path.display()))?;
+            .map_err(|e| anyhow!("Failed to load tokenizer from {}: {}", tokenizer_path.display(), e))?;
 
         // Load model config
         let config_path = Path::new(model_path).join("config.json");
@@ -110,8 +110,8 @@ impl InferenceService {
             };
 
             // Check for end token
-            if let Some(eos_token) = self.tokenizer.get_vocab().get("[SEP]")
-                .or_else(|| self.tokenizer.get_vocab().get("<|endoftext|>")) {
+            if let Some(eos_token) = self.tokenizer.get_vocab(true).get("[SEP]")
+                .or_else(|| self.tokenizer.get_vocab(true).get("<|endoftext|>")) {
                 if next_token == *eos_token {
                     break;
                 }

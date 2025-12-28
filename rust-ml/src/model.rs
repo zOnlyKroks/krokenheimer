@@ -1,5 +1,6 @@
 // Model utilities and configuration
 use candle_transformers::models::gpt2::Config as Gpt2Config;
+use candle_nn::Activation;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use std::path::Path;
@@ -88,7 +89,7 @@ impl ModelUtils {
             n_layer: 8,          // Fewer layers
             n_head: 8,           // Fewer heads
             n_inner: Some(2048), // Smaller FFN
-            activation_function: candle_transformers::models::gpt2::Activation::Gelu,
+            activation_function: Activation::Gelu,
             resid_pdrop: 0.1,
             embd_pdrop: 0.1,
             attn_pdrop: 0.1,
@@ -110,7 +111,7 @@ impl ModelUtils {
             n_layer: 12,
             n_head: 12,
             n_inner: Some(3072),
-            activation_function: candle_transformers::models::gpt2::Activation::Gelu,
+            activation_function: Activation::Gelu,
             resid_pdrop: 0.1,
             embd_pdrop: 0.1,
             attn_pdrop: 0.1,
