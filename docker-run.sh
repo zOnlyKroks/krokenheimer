@@ -43,12 +43,24 @@ docker rm krokenheimer-bot 2>/dev/null
 docker run -d \
     --name krokenheimer-bot \
     --restart unless-stopped \
+    -p 3000:3000 \
     -e BOT_TOKEN="$BOT_TOKEN" \
     -e BOT_OWNERS="$BOT_OWNERS" \
     -e LLM_ENABLED="${LLM_ENABLED:-true}" \
     -e LLM_MIN_INTERVAL_MINUTES="${LLM_MIN_INTERVAL_MINUTES:-60}" \
     -e LLM_MAX_INTERVAL_MINUTES="${LLM_MAX_INTERVAL_MINUTES:-180}" \
     -e LLM_SCAN_INTERVAL_MINUTES="${LLM_SCAN_INTERVAL_MINUTES:-2}" \
+    -e REMOTE_API_ENABLED="${REMOTE_API_ENABLED:-true}" \
+    -e REMOTE_API_PORT="${REMOTE_API_PORT:-3000}" \
+    -e REMOTE_API_TOKEN="${REMOTE_API_TOKEN:-kroken-secure-token-change-me-12345}" \
+    -e REMOTE_API_AUTH="${REMOTE_API_AUTH:-true}" \
+    -e REMOTE_TRAINING_MIN_MESSAGES="${REMOTE_TRAINING_MIN_MESSAGES:-1000}" \
+    -e REMOTE_TRAINING_INTERVAL_HOURS="${REMOTE_TRAINING_INTERVAL_HOURS:-12}" \
+    -e REMOTE_TRAINING_MAX_CLIENTS="${REMOTE_TRAINING_MAX_CLIENTS:-1}" \
+    -e REMOTE_TRAINING_DEFAULT_EPOCHS="${REMOTE_TRAINING_DEFAULT_EPOCHS:-10}" \
+    -e REMOTE_TRAINING_MODEL_NAME="${REMOTE_TRAINING_MODEL_NAME:-krokenheimer}" \
+    -e REMOTE_TRAINING_RECOMMEND_GPU="${REMOTE_TRAINING_RECOMMEND_GPU:-true}" \
+    -e REMOTE_TRAINING_PREFERRED_GPU="${REMOTE_TRAINING_PREFERRED_GPU:-rocm}" \
     -v "$(pwd)/data:/app/data" \
     -v "$(pwd)/chroma_data:/app/chroma_data" \
     krokenheimer-bot
