@@ -767,79 +767,48 @@ ${channelList}
       // Training is now handled by local Rust ML
       const stats = await fineTuningService.getTrainingStats();
 
-      if (!remoteConfig.apiEnabled) {
-        await message.reply(
-          '❌ **Remote Training API Disabled**\n\n' +
-          'Training is now exclusively performed by remote Windows clients.\n\n' +
-          '💡 **To enable training:**\n' +
-          '1. Set `REMOTE_API_ENABLED=true` in your `.env` file\n' +
-          '2. Restart the bot\n' +
-          '3. Setup a Windows client with the remote training script\n\n' +
-          '📚 See remote training setup guide for instructions.'
-        );
-        return;
-      }
-
       if (stats.totalMessages < 500) {
         await message.reply(
           `⚠️ **Not enough messages for training**\n\n` +
           `Currently have ${stats.totalMessages} messages, need at least 500.\n\n` +
-          `💡 Collect more messages in Discord channels, then remote clients will automatically train when thresholds are met.`
+          `💡 Collect more messages in Discord channels and try training again.`
         );
         return;
       }
 
       await message.reply(
-        '🌐 **Training is now handled by remote Windows clients**\n\n' +
-        `📊 **Current Data:**\n` +
+        '🦀 **Starting local Rust ML training**\n\n' +
+        `📊 **Training Data:**\n` +
         `• Total messages: ${stats.totalMessages}\n` +
         `• New messages: ${stats.newMessages}\n` +
         `• Model version: v${stats.modelVersion}\n\n` +
-        `🤖 **Remote Training Process:**\n` +
-        `1. Windows clients connect to this bot's API\n` +
-        `2. They check for training opportunities automatically\n` +
-        `3. Training happens on the Windows machine (RX 5700 XT)\n` +
-        `4. Trained models are uploaded back to this bot\n\n` +
-        `⚡ **Expected Training Time (RX 5700 XT):**\n` +
-        `• ROCm: 45-90 minutes (3-5x faster than CPU)\n` +
-        `• DirectML: 1-2 hours (2-4x faster than CPU)\n\n` +
-        `💡 **Setup Remote Client:**\n` +
-        `• Use \`!llmremote status\` for API connection details\n` +
-        `• Run remote_trainer.py on your Windows 11 machine\n` +
-        `• Client will handle training automatically based on thresholds`
+        `🦀 **Rust ML Training Process:**\n` +
+        `1. Training data prepared from Discord messages\n` +
+        `2. Local Rust ML training starts\n` +
+        `3. Model weights saved to disk\n` +
+        `4. Bot updated with new trained model\n\n` +
+        `⚡ **Training Info:**\n` +
+        `• Method: CPU-based local training\n` +
+        `• Duration: Variable (depending on data size)\n` +
+        `• Epochs: 10 (default)\n\n` +
+        `💡 **Check Progress:**\n` +
+        `• Use \`!llmtrain status\` to monitor training\n` +
+        `• Training logs will show progress\n` +
+        `• Bot will use new model after completion`
       );
     } else if (command === 'force') {
-      // Force immediate training
+      // Force immediate training using Rust ML
       const stats = await fineTuningService.getTrainingStats();
-      const remoteConfig = {
-        apiEnabled: false,
-        apiPort: 0,
-        authEnabled: false,
-        minMessagesThreshold: 1000,
-        trainingIntervalHours: 12,
-        preferredGpuType: 'rust-cpu',
-        loggingEnabled: true
-      };
-
-      if (!remoteConfig.apiEnabled) {
-        await message.reply(
-          '❌ **Remote Training API Disabled**\n\n' +
-          'Remote training API must be enabled to force training.\n\n' +
-          '💡 **To enable:**\n' +
-          '• Set `REMOTE_API_ENABLED=true` in your `.env` file\n' +
-          '• Restart the bot'
-        );
-        return;
-      }
-
-      // Create force training flag
+      // Start Rust ML training immediately
       try {
-        const fs = await import('fs/promises');
-        const forceFlagPath = './data/force_training.flag';
-        await fs.writeFile(forceFlagPath, JSON.stringify({
-          timestamp: new Date().toISOString(),
-          requestedBy: message.author.id,
-          requestedByName: message.author.username,
+        const result = await rustMLService.startTraining();
+        if (result.success) {
+          await message.reply(
+            '🦀 **Rust ML Training Started!**\n\n' +
+            `📊 **Training Data:** ${stats.totalMessages} messages\n` +
+            `⚡ **Method:** Local CPU training\n\n` +
+            `💡 Use \`!llmtrain status\` to monitor progress.`
+          );
           messageCount: stats.totalMessages
         }));
 
