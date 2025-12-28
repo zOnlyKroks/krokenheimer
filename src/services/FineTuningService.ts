@@ -79,6 +79,14 @@ export class FineTuningService {
   }
 
   /**
+   * Check if training should be triggered (alias for shouldRecommendTraining)
+   * Used by LLMPlugin for compatibility
+   */
+  shouldTrain(): boolean {
+    return this.shouldRecommendTraining();
+  }
+
+  /**
    * Get current training status (for API responses)
    */
   getTrainingStatus(): {
@@ -107,6 +115,32 @@ export class FineTuningService {
       elapsedTime: this.remoteTrainingStatus.elapsedTime,
       eta: this.remoteTrainingStatus.eta
     };
+  }
+
+  /**
+   * Start training preparation (for remote training architecture)
+   * This prepares data for remote clients but doesn't perform local training
+   */
+  async startTraining(): Promise<void> {
+    try {
+      logger.info('🚀 Preparing training data for remote training...');
+
+      // Check if we have sufficient data
+      const dataCheck = await this.hasInsufficientData();
+      if (dataCheck.insufficient) {
+        throw new Error(dataCheck.reason);
+      }
+
+      // Export training data for remote clients
+      await this.exportTrainingData();
+
+      // Mark as ready for training (but not actually training since it's remote)
+      logger.info('✅ Training data prepared. Remote clients can now download and train.');
+
+    } catch (error) {
+      logger.error('❌ Failed to prepare training data:', error);
+      throw error;
+    }
   }
 
   /**

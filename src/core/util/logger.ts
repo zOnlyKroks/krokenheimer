@@ -20,3 +20,6 @@ export class Logger {
     console.debug(this.formatMessage("DEBUG", message), ...args);
   }
 }
+
+// Export a default logger instance
+export const logger = new Logger();

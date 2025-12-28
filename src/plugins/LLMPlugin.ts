@@ -696,8 +696,6 @@ ${channelList}
 
 **Training Status:**
 • Training: ${trainingStatus.isTraining ? '🔄 In progress...' : '✅ Idle'}
-• Messages since last train: ${trainingStatus.messagesSinceLastTrain}/${trainingStatus.threshold}
-• Progress: ${Math.round((trainingStatus.messagesSinceLastTrain / trainingStatus.threshold) * 100)}%
       `;
 
       await message.reply(statsText);
@@ -759,7 +757,8 @@ ${channelList}
       return;
     }
 
-    const command = args[0].toLowerCase();
+    // @ts-ignore
+      const command = args[0].toLowerCase();
 
     if (command === 'now') {
       // Training is now exclusively handled by remote clients
