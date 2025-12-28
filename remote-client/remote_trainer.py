@@ -9,6 +9,7 @@ import json
 import os
 import requests
 import subprocess
+import sys
 import time
 import logging
 from datetime import datetime
@@ -103,8 +104,34 @@ class RemoteTrainerClient:
             logger.error(f"Failed to get training status: {e}")
             return {}
 
+    def check_force_training(self) -> tuple[bool, str]:
+        """Check if force training has been requested via Discord command."""
+        try:
+            response = self.session.get(
+                f"http://{self.config['bot_host']}:{self.config['bot_port']}/api/training/force-check",
+                timeout=10
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get('forceTraining', False):
+                requested_by = data.get('requestedBy', 'Unknown')
+                logger.info(f"[FORCE] Force training requested by {requested_by}")
+                return True, f"Force training requested by {requested_by}"
+
+            return False, data.get('reason', 'No force training requested')
+
+        except requests.RequestException as e:
+            logger.error(f"Failed to check force training: {e}")
+            return False, "Could not check force training status"
+
     def should_start_training(self) -> tuple[bool, str]:
         """Check if training should be started."""
+        # First check for force training flag
+        force_result = self.check_force_training()
+        if force_result[0]:
+            return force_result
+
         status = self.get_training_status()
 
         if not status:
@@ -336,30 +363,38 @@ class RemoteTrainerClient:
             time.sleep(check_interval)
 
 def main():
-    parser = argparse.ArgumentParser(description="Remote Training Client for Windows 11 + RX 5700 XT")
-    parser.add_argument("--config", default="remote_config.json", help="Config file path")
-    parser.add_argument("--daemon", action="store_true", help="Run as daemon")
-    parser.add_argument("--test-connection", action="store_true", help="Test connection only")
-    parser.add_argument("--force-train", action="store_true", help="Force training regardless of checks")
+    try:
+        parser = argparse.ArgumentParser(description="Remote Training Client for Windows 11 + RX 5700 XT")
+        parser.add_argument("--config", default="remote_config.json", help="Config file path")
+        parser.add_argument("--daemon", action="store_true", help="Run as daemon")
+        parser.add_argument("--test-connection", action="store_true", help="Test connection only")
+        parser.add_argument("--force-train", action="store_true", help="Force training regardless of checks")
 
-    args = parser.parse_args()
+        args = parser.parse_args()
 
-    client = RemoteTrainerClient(args.config)
+        client = RemoteTrainerClient(args.config)
 
-    if args.test_connection:
-        success = client.test_connection()
-        exit(0 if success else 1)
+        if args.test_connection:
+            success = client.test_connection()
+            logger.info(f"[DEBUG] test_connection returned: {success}")
+            sys.exit(0 if success else 1)
 
-    if args.force_train:
-        success = client.run_training_cycle()
-        exit(0 if success else 1)
+        if args.force_train:
+            success = client.run_training_cycle()
+            sys.exit(0 if success else 1)
 
-    if args.daemon:
-        client.run_forever()
-    else:
-        # Single training cycle
-        success = client.run_training_cycle()
-        exit(0 if success else 1)
+        if args.daemon:
+            client.run_forever()
+        else:
+            # Single training cycle
+            success = client.run_training_cycle()
+            sys.exit(0 if success else 1)
+
+    except Exception as e:
+        logger.error(f"[ERROR] Unexpected error in main: {e}")
+        import traceback
+        logger.error(f"[TRACEBACK] {traceback.format_exc()}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

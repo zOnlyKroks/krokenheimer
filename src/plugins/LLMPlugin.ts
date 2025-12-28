@@ -41,7 +41,7 @@ export class LLMPlugin implements BotPlugin {
     {
       name: 'llmtrain',
       description: 'Manage model training',
-      usage: 'llmtrain [now|status]',
+      usage: 'llmtrain [status|force]',
       execute: this.manageTrain.bind(this),
     },
     {
@@ -806,8 +806,54 @@ ${channelList}
         `• Run remote_trainer.py on your Windows 11 machine\n` +
         `• Client will handle training automatically based on thresholds`
       );
+    } else if (command === 'force') {
+      // Force immediate training
+      const stats = await fineTuningService.getTrainingStats();
+      const remoteConfig = remoteTrainingConfig.getStatusInfo();
+
+      if (!remoteConfig.apiEnabled) {
+        await message.reply(
+          '❌ **Remote Training API Disabled**\n\n' +
+          'Remote training API must be enabled to force training.\n\n' +
+          '💡 **To enable:**\n' +
+          '• Set `REMOTE_API_ENABLED=true` in your `.env` file\n' +
+          '• Restart the bot'
+        );
+        return;
+      }
+
+      // Create force training flag
+      try {
+        const fs = await import('fs/promises');
+        const forceFlagPath = './data/force_training.flag';
+        await fs.writeFile(forceFlagPath, JSON.stringify({
+          timestamp: new Date().toISOString(),
+          requestedBy: message.author.id,
+          requestedByName: message.author.username,
+          messageCount: stats.totalMessages
+        }));
+
+        await message.reply(
+          '🚀 **Force Training Signal Sent!**\n\n' +
+          `📊 **Training Data:**\n` +
+          `• Total messages: ${stats.totalMessages}\n` +
+          `• Current model version: v${stats.modelVersion}\n\n` +
+          `⚡ **Next Steps:**\n` +
+          `• Remote Windows clients will detect this signal on their next check\n` +
+          `• Training will start immediately regardless of thresholds\n` +
+          `• Check \`!llmremote logs\` for training progress\n\n` +
+          `💡 **Note:** Force training bypasses:\n` +
+          `• Minimum message requirements (${remoteConfig.minMessagesThreshold})\n` +
+          `• Training interval limits (${remoteConfig.trainingIntervalHours}h)\n` +
+          `• Active training checks`
+        );
+
+      } catch (error) {
+        await message.reply('❌ Failed to create force training signal. Check bot logs for details.');
+        console.error('Failed to create force training flag:', error);
+      }
     } else {
-      await message.reply('❌ Unknown command. Use `!llmtrain status` for training information.\n\n💡 Training is now handled by remote Windows clients. Use `!llmremote` commands for remote training management.');
+      await message.reply('❌ Unknown command. Use `!llmtrain status` for training information.\n\n💡 Available commands:\n• `!llmtrain status` - Show training status\n• `!llmtrain force` - Force immediate training\n\n🌐 Remote training is handled by Windows clients. Use `!llmremote` commands for remote training management.');
     }
   }
 

@@ -18,12 +18,15 @@ if not exist "remote_config.json" (
 
 echo Testing connection to Discord bot...
 venv\Scripts\python.exe remote_trainer.py --test-connection
-if errorlevel 1 (
+set EXIT_CODE=%ERRORLEVEL%
+echo Debug: Exit code was %EXIT_CODE%
+
+if %EXIT_CODE% NEQ 0 (
     echo.
     echo ERROR: Cannot connect to Discord bot!
     echo Check your remote_config.json settings:
     echo - bot_host: IP address of your Discord bot
-    echo - bot_port: API port (usually 3000)
+    echo - bot_port: API port (usually 3000^)
     echo - auth_token: Must match bot's REMOTE_API_TOKEN
     echo.
     pause

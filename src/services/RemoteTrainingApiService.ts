@@ -395,6 +395,47 @@ export class RemoteTrainingApiService {
       }
     });
 
+    // Check for force training flag
+    this.app.get('/api/training/force-check', async (req: Request, res: Response) => {
+      try {
+        const forceFlagPath = resolve('./data/force_training.flag');
+
+        if (!existsSync(forceFlagPath)) {
+          res.json({ forceTraining: false, reason: 'No force training flag found' });
+          return;
+        }
+
+        const flagData = await readFile(forceFlagPath, 'utf-8');
+        const forceRequest = JSON.parse(flagData);
+
+        // Check if flag is recent (within last hour to avoid stale requests)
+        const requestTime = new Date(forceRequest.timestamp);
+        const now = new Date();
+        const hoursDiff = (now.getTime() - requestTime.getTime()) / (1000 * 60 * 60);
+
+        if (hoursDiff > 1) {
+          // Remove stale flag
+          await unlink(forceFlagPath).catch(() => {});
+          res.json({ forceTraining: false, reason: 'Force training flag expired (>1 hour old)' });
+          return;
+        }
+
+        res.json({
+          forceTraining: true,
+          requestedBy: forceRequest.requestedByName,
+          timestamp: forceRequest.timestamp,
+          messageCount: forceRequest.messageCount
+        });
+
+        // Remove the flag after successful response so it's only used once
+        await unlink(forceFlagPath).catch(() => {});
+
+      } catch (error) {
+        logger.error('Failed to check force training flag:', error);
+        res.status(500).json({ error: 'Failed to check force training flag' });
+      }
+    });
+
     // 404 handler
     this.app.use((req: Request, res: Response) => {
       res.status(404).json({
@@ -405,7 +446,8 @@ export class RemoteTrainingApiService {
           'POST /api/training/export',
           'POST /api/training/upload',
           'POST /api/training/complete',
-          'GET /api/training/logs'
+          'GET /api/training/logs',
+          'GET /api/training/force-check'
         ]
       });
     });
