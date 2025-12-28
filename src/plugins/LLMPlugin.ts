@@ -807,7 +807,7 @@ ${channelList}
             '🦀 **Rust ML Training Started!**\n\n' +
             `📊 **Training Data:** ${stats.totalMessages} messages\n` +
             `⚡ **Method:** Local CPU training\n\n` +
-            `💡 Use \`!llmtrain status\` to monitor progress.`
+            `💡 Use \`!llmtrain status\` to monitor progress.`)
         } else {
           await message.reply(
             '❌ **Training Failed to Start**\n\n' +
@@ -988,6 +988,74 @@ ${channelList}
     response += `💡 **Tip:** Use \`!llmexclude add <channelId>\` to exclude channels from training.`;
 
     await message.reply(response);
+  }
+
+  /**
+   * Handle local Rust ML commands
+   */
+  private async manageRustML(message: Message, args: string[]): Promise<void> {
+    if (args.length === 0 || args[0] === 'status') {
+      await this.showRustMLStatus(message);
+      return;
+    }
+
+    // @ts-ignore
+      const command = args[0].toLowerCase();
+
+    if (command === 'logs') {
+      await this.showRustMLLogs(message);
+    } else {
+      await message.reply(
+        '❌ Unknown command.\n\n💡 Available commands:\n' +
+        '• `!llmrust status` - Show Rust ML status\n' +
+        '• `!llmrust logs` - Show training logs'
+      );
+    }
+  }
+
+  /**
+   * Show Rust ML system status
+   */
+  private async showRustMLStatus(message: Message): Promise<void> {
+    const rustInitialized = await rustMLService.initialize();
+    const modelExists = await rustMLService.checkModelExists();
+    const config = rustMLService.getConfig();
+
+    let response = '**🦀 Rust ML System Status**\n\n';
+
+    if (rustInitialized) {
+      response += '✅ **Status:** Rust module loaded\n';
+      response += `📦 **Model:** ${modelExists ? '✅ Trained model found' : '⚠️ No trained model'}\n`;
+      response += `🔧 **Backend:** ${config.backend}\n`;
+      response += `🌡️ **Temperature:** ${config.temperature}\n`;
+      response += `📏 **Max Tokens:** ${config.maxTokens}\n`;
+      response += `🪟 **Context Window:** ${config.contextWindow}\n\n`;
+
+      if (modelExists) {
+        response += '💡 **Ready to generate responses using trained model**\n';
+      } else {
+        response += '💡 **Use `!llmtrain now` to train your first model**\n';
+      }
+    } else {
+      response += '❌ **Status:** Rust module not available\n';
+      response += '🔧 **Backend:** Fallback mode\n\n';
+      response += '💡 **To enable Rust ML:**\n';
+      response += '• Compile the Rust module: `cd rust-ml && cargo build --release`\n';
+      response += '• Restart the bot\n';
+    }
+
+    await message.reply(response);
+  }
+
+  /**
+   * Show Rust ML training logs
+   */
+  private async showRustMLLogs(message: Message): Promise<void> {
+    await message.reply(
+      '📋 **Rust ML Training Logs**\n\n' +
+      'Local training logs are output to the console.\n\n' +
+      '💡 Check the bot\'s console output for training progress and errors.'
+    );
   }
 
   /**

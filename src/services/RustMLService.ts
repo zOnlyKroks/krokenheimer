@@ -175,7 +175,8 @@ export class RustMLService {
     ];
 
     const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-    return Promise.resolve(randomResponse);
+      // @ts-ignore
+      return Promise.resolve(randomResponse);
   }
 
   private buildContextPrompt(context: StoredMessage[], channelName: string): string {
@@ -194,7 +195,8 @@ export class RustMLService {
   }
 
   private getRandomFallback(): string {
-    return this.fallbackResponses[Math.floor(Math.random() * this.fallbackResponses.length)];
+    // @ts-ignore
+      return this.fallbackResponses[Math.floor(Math.random() * this.fallbackResponses.length)];
   }
 
   // Training methods
@@ -221,6 +223,79 @@ export class RustMLService {
         ? `Ready to train with ${newMessages} new messages`
         : `Only ${newMessages} new messages (need ${threshold})`
     };
+  }
+
+  async startTraining(): Promise<{success: boolean, error?: string}> {
+    try {
+      // Prepare training data from stored messages
+      const trainingDataPath = await this.prepareTrainingData();
+      const success = await this.trainModel(trainingDataPath, 10);
+
+      if (success) {
+        return { success: true };
+      } else {
+        return { success: false, error: 'Training failed - check logs for details' };
+      }
+    } catch (error) {
+      console.error('[RustML] Start training failed:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred'
+      };
+    }
+  }
+
+  private async prepareTrainingData(): Promise<string> {
+    // Create training data file from stored messages
+    const dataPath = './data/training_data.jsonl';
+
+    try {
+      // Import the message storage service to get actual stored messages
+      const { default: messageStorageService } = await import('./MessageStorageService.js');
+
+      // Get messages from the database
+      const messages = await messageStorageService.getAllMessages();
+
+      if (!messages || messages.length === 0) {
+        console.warn('[RustML] No stored messages found in database, cannot train');
+        throw new Error('No training data available - collect some messages first');
+      }
+
+      // Format messages as conversation data for training
+      const trainingData: any[] = [];
+
+      // Group messages into conversations and format them
+      for (let i = 0; i < messages.length - 1; i++) {
+        const currentMsg = messages[i];
+        const nextMsg = messages[i + 1];
+
+        if(!currentMsg || !nextMsg) {
+            throw new Error("[RustML] Current or next message empty")
+        }
+
+        // Skip if same author or if it's bot responding to itself
+        if (currentMsg.authorName === nextMsg.authorName) continue;
+        if (currentMsg.authorName === 'Krokenheimer') continue;
+
+        // Create training conversation
+          trainingData.push({
+          messages: [
+            { role: 'user', content: currentMsg.content },
+            { role: 'assistant', content: nextMsg.authorName === 'Krokenheimer' ? nextMsg.content : '👍' }
+          ]
+        });
+      }
+
+      // Write training data as JSONL (one JSON object per line)
+      const jsonlData = trainingData.map(item => JSON.stringify(item)).join('\n');
+      await fs.writeFile(dataPath, jsonlData, 'utf8');
+
+      console.log(`[RustML] Prepared ${trainingData.length} training conversations from ${messages.length} stored messages`);
+      return dataPath;
+    } catch (error) {
+      console.error('[RustML] Failed to prepare training data:', error);
+      throw error;
+    }
   }
 
   async trainModel(trainingDataPath: string, epochs: number = 3): Promise<boolean> {
