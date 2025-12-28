@@ -3,7 +3,7 @@ import type { BotPlugin, BotCommand } from '../types/index.js';
 import type { ExtensibleBot } from '../core/Bot.js';
 import messageStorageService from '../services/MessageStorageService.js';
 import vectorStoreService from '../services/VectorStoreService.js';
-import modelInferenceService from '../services/ModelInferenceService.js';
+import rustMLService from '../services/RustMLService.js';
 import fineTuningService from '../services/FineTuningService.js';
 import trainingConfig from '../config/trainingConfig.js';
 import remoteTrainingConfig from '../config/remoteTrainingConfig.js';
@@ -92,16 +92,21 @@ export class LLMPlugin implements BotPlugin {
     console.log('🔧 Initializing remote training configuration...');
     remoteTrainingConfig.initialize();
 
-    // Check if trained model exists
-    console.log('1️⃣  Checking for trained model...');
-    const modelExists = await modelInferenceService.checkModelExists();
-    if (!modelExists) {
-      console.log('⚠️  No trained model found yet.');
-      console.log('💡 Train your model with: !llmtrain now');
+    // Initialize Rust ML service and check for trained model
+    console.log('1️⃣  Initializing Rust ML service...');
+    const rustInitialized = await rustMLService.initialize();
+    const modelExists = await rustMLService.checkModelExists();
+
+    if (rustInitialized && modelExists) {
+      console.log('✅ Rust ML service initialized with trained model');
+    } else if (rustInitialized && !modelExists) {
+      console.log('⚠️  Rust ML service running in fallback mode - no trained model found yet.');
+      console.log('💡 Train your model with: !llmtrain now or POST /api/ml/train');
       console.log('   Model will be trained from scratch using YOUR Discord messages.');
       console.log('   Bot will respond once training is complete.');
     } else {
-      console.log('✅ Trained model loaded successfully');
+      console.log('⚠️  Rust ML service running in fallback mode - Rust module not compiled');
+      console.log('💡 Compile Rust module for better performance: cd rust-ml && cargo build --release');
     }
 
     // Initialize vector store (ChromaDB should already be ready)
@@ -165,7 +170,7 @@ export class LLMPlugin implements BotPlugin {
       }
 
       // Generate a response using YOUR trained model (this takes time)
-      const response = await modelInferenceService.generateMentionResponse(recentMessages, message.content, message.author.username);
+      const response = await rustMLService.generateMentionResponse(recentMessages, message.content, message.author.username);
 
       // Validate response is not empty
       if (!response || response.trim().length === 0) {
@@ -369,8 +374,8 @@ export class LLMPlugin implements BotPlugin {
       }
 
       // Generate message using LLM with RAG (passes channelId for vector search)
-      console.log(`🤖 Generating message for #${channelName} (using RAG)...`);
-      const generatedContent = await modelInferenceService.generateMessage(recentMessages, channelName, channelId);
+      console.log(`🤖 Generating message for #${channelName} (using Rust ML)...`);
+      const generatedContent = await rustMLService.generateMessage(recentMessages, channelName, channelId);
 
       // Validate response is not empty
       if (!generatedContent || generatedContent.trim().length === 0) {
@@ -645,7 +650,7 @@ export class LLMPlugin implements BotPlugin {
       const totalMessages = messageStorageService.getTotalMessageCount();
       const vectorCount = await vectorStoreService.getCollectionCount();
       const activeChannels = messageStorageService.getActiveChannels();
-      const llmConfig = modelInferenceService.getConfig();
+      const llmConfig = rustMLService.getConfig();
       const trainingStatus = fineTuningService.getTrainingStatus();
 
       // Get current German time

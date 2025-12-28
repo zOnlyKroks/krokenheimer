@@ -7,6 +7,7 @@ import {promisify} from 'util';
 import {readFile, unlink, writeFile} from 'fs/promises';
 import {MessageStorageService} from './MessageStorageService.js';
 import {FineTuningService} from './FineTuningService.js';
+import rustMLService from './RustMLService.js';
 
 const pipelineAsync = promisify(pipeline);
 
@@ -436,6 +437,188 @@ export class RemoteTrainingApiService {
       }
     });
 
+    // NEW RUST ML ENDPOINTS
+
+    // Get Rust ML service status and config
+    this.app.get('/api/ml/status', async (req: Request, res: Response) => {
+      try {
+        const modelExists = await rustMLService.checkModelExists();
+        const config = rustMLService.getConfig();
+        const modelInfo = rustMLService.getModelInfo();
+        const trainingStatus = await rustMLService.getTrainingStatus();
+
+        res.json({
+          service: 'rust-ml',
+          model_exists: modelExists,
+          model_info: modelInfo,
+          config: config,
+          training_status: trainingStatus,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        logger.error('Failed to get Rust ML status:', error);
+        res.status(500).json({ error: 'Failed to get Rust ML status' });
+      }
+    });
+
+    // Manually trigger local Rust training
+    this.app.post('/api/ml/train', async (req: Request, res: Response) => {
+      try {
+        const { epochs = 3, force = false } = req.body;
+
+        logger.info(`Manual Rust training requested - Epochs: ${epochs}, Force: ${force}`);
+
+        // Check if training should start (unless forced)
+        if (!force) {
+          const totalMessages = await this.messageStorageService.getTotalMessageCount();
+
+          // Get last training count
+          const stateFilePath = resolve('./data/training_state.json');
+          let lastTrainCount = 0;
+
+          if (existsSync(stateFilePath)) {
+            try {
+              const stateData = await readFile(stateFilePath, 'utf-8');
+              const state = JSON.parse(stateData);
+              lastTrainCount = state.lastTrainMessageCount || 0;
+            } catch (error) {
+              logger.warn('Failed to read training state:', error);
+            }
+          }
+
+          const shouldTrainingResult = await rustMLService.shouldStartTraining(
+            totalMessages,
+            lastTrainCount,
+            1000
+          );
+
+          if (!shouldTrainingResult.shouldTrain) {
+            res.status(400).json({
+              success: false,
+              reason: shouldTrainingResult.reason,
+              message: 'Training criteria not met. Use force=true to override.',
+              current_messages: totalMessages,
+              last_train_count: lastTrainCount,
+              new_messages: totalMessages - lastTrainCount
+            });
+            return;
+          }
+        }
+
+        // Export training data
+        const trainingDataPath = await this.fineTuningService.exportTrainingData();
+        if (!trainingDataPath || !existsSync(trainingDataPath)) {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to export training data'
+          });
+          return;
+        }
+
+        // Start training (this is async)
+        const trainingSuccess = await rustMLService.trainModel(trainingDataPath, epochs);
+
+        if (trainingSuccess) {
+          // Update training state
+          const stateFilePath = resolve('./data/training_state.json');
+          let trainingState = { lastTrainMessageCount: 0, modelVersion: 0, lastTrainDate: '' };
+
+          if (existsSync(stateFilePath)) {
+            try {
+              const stateData = await readFile(stateFilePath, 'utf-8');
+              trainingState = JSON.parse(stateData);
+            } catch (error) {
+              logger.warn('Failed to read existing training state');
+            }
+          }
+
+          trainingState.lastTrainMessageCount = await this.messageStorageService.getTotalMessageCount();
+          trainingState.modelVersion += 1;
+          trainingState.lastTrainDate = new Date().toISOString();
+
+          await writeFile(stateFilePath, JSON.stringify(trainingState, null, 2));
+
+          logger.info('✅ Local Rust training completed successfully');
+          res.json({
+            success: true,
+            message: 'Local Rust training completed successfully',
+            model_version: trainingState.modelVersion,
+            training_epochs: epochs,
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          logger.error('❌ Local Rust training failed');
+          res.status(500).json({
+            success: false,
+            error: 'Local Rust training failed'
+          });
+        }
+
+      } catch (error) {
+        logger.error('Failed to start local training:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to start local training'
+        });
+      }
+    });
+
+    // Check if local training should start (for auto-training logic)
+    this.app.get('/api/ml/should-train', async (req: Request, res: Response) => {
+      try {
+        const totalMessages = await this.messageStorageService.getTotalMessageCount();
+        const threshold = parseInt(req.query.threshold as string) || 1000;
+
+        // Get last training count
+        const stateFilePath = resolve('./data/training_state.json');
+        let lastTrainCount = 0;
+
+        if (existsSync(stateFilePath)) {
+          try {
+            const stateData = await readFile(stateFilePath, 'utf-8');
+            const state = JSON.parse(stateData);
+            lastTrainCount = state.lastTrainMessageCount || 0;
+          } catch (error) {
+            logger.warn('Failed to read training state:', error);
+          }
+        }
+
+        const result = await rustMLService.shouldStartTraining(totalMessages, lastTrainCount, threshold);
+
+        res.json({
+          should_train: result.shouldTrain,
+          reason: result.reason,
+          current_messages: totalMessages,
+          last_train_count: lastTrainCount,
+          new_messages: totalMessages - lastTrainCount,
+          threshold: threshold,
+          timestamp: new Date().toISOString()
+        });
+
+      } catch (error) {
+        logger.error('Failed to check training criteria:', error);
+        res.status(500).json({ error: 'Failed to check training criteria' });
+      }
+    });
+
+    // Initialize Rust ML service
+    this.app.post('/api/ml/initialize', async (req: Request, res: Response) => {
+      try {
+        const initialized = await rustMLService.initialize();
+
+        res.json({
+          success: true,
+          initialized: initialized,
+          message: initialized ? 'Rust ML service initialized successfully' : 'Rust ML service running in fallback mode',
+          timestamp: new Date().toISOString()
+        });
+
+      } catch (error) {
+        logger.error('Failed to initialize Rust ML service:', error);
+        res.status(500).json({ error: 'Failed to initialize Rust ML service' });
+      }
+    });
+
     // 404 handler
     this.app.use((req: Request, res: Response) => {
       res.status(404).json({
@@ -447,7 +630,11 @@ export class RemoteTrainingApiService {
           'POST /api/training/upload',
           'POST /api/training/complete',
           'GET /api/training/logs',
-          'GET /api/training/force-check'
+          'GET /api/training/force-check',
+          'GET /api/ml/status',
+          'POST /api/ml/train',
+          'GET /api/ml/should-train',
+          'POST /api/ml/initialize'
         ]
       });
     });

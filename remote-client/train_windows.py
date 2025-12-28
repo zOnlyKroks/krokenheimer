@@ -17,24 +17,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def setup_windows_environment():
-    """Setup Windows environment for MAXIMUM CPU training."""
-    import multiprocessing
+    """Setup Windows environment for MAXIMUM SPEED CPU training."""
     import os
 
-    logger.info("[WIN] Setting up Windows environment for MAXIMUM CPU PERFORMANCE...")
+    logger.info("[SPEED] Setting up for ULTRA-FAST CPU training...")
 
-    # Set CPU optimization environment variables
-    os.environ['OMP_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
-    os.environ['MKL_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
-    os.environ['NUMEXPR_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
-    os.environ['OPENBLAS_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
+    # Use ALL available cores
+    cpu_count = multiprocessing.cpu_count()
+    os.environ['OMP_NUM_THREADS'] = str(cpu_count)
+    os.environ['MKL_NUM_THREADS'] = str(cpu_count)
+    os.environ['NUMEXPR_NUM_THREADS'] = str(cpu_count)
+    os.environ['OPENBLAS_NUM_THREADS'] = str(cpu_count)
 
-    # Disable any GPU usage
+    # Disable GPU
     os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
-    logger.info(f"[CPU] CPU-only mode with {multiprocessing.cpu_count()} cores")
-    logger.info(f"[CPU] OMP_NUM_THREADS: {os.environ.get('OMP_NUM_THREADS')}")
-
+    logger.info(f"[SPEED] Using ALL {cpu_count} CPU cores")
     return "cpu"
 
 def load_training_data(file_path: str):
@@ -55,59 +53,54 @@ def load_training_data(file_path: str):
     return conversations
 
 def calculate_dynamic_params(num_conversations: int):
-    """Calculate training parameters for MAXIMUM QUALITY CPU training."""
-    logger.info(f"[CPU] Calculating parameters for {num_conversations} conversations on CPU")
+    """Calculate training parameters for FAST 10-20 minute CPU training."""
+    logger.info(f"[FAST] Calculating parameters for {num_conversations} conversations")
 
-    # MAXIMUM QUALITY CPU parameters - use ALL resources
-    import multiprocessing
-    max_workers = min(multiprocessing.cpu_count(), 12)  # All cores but cap for stability
-
+    # OPTIMIZED FOR SPEED - 10-20 minute training
     params = {
-        'learning_rate': 2e-5,   # Lower for better convergence
-        'weight_decay': 0.1,     # Higher regularization
-        'num_train_epochs': 15,  # More epochs for quality
-        'per_device_train_batch_size': 6,    # Large batch (use more RAM)
-        'gradient_accumulation_steps': 8,    # Massive effective batch size
-        'warmup_steps': 300,     # Longer warmup for stability
-        'save_steps': 100,       # Frequent checkpointing
-        'logging_steps': 10,     # Detailed progress
-        'max_grad_norm': 0.3,    # Conservative gradient clipping
-        'dataloader_num_workers': 2,  # ALL CPU cores
-        'lr_scheduler_type': 'cosine',  # Better learning rate decay
-        'eval_steps': 200,       # Regular evaluation
-        'save_total_limit': 5,   # Keep more checkpoints
-        'load_best_model_at_end': True,  # Use best checkpoint
-        'dataloader_pin_memory': False,      # CPU doesn't need pinned memory
-        'fp16': False,                       # CPU prefers fp32
-        'bf16': False,                       # Ensure no mixed precision
-        'tf32': False,                       # Pure fp32 for CPU
-        'gradient_checkpointing': True,      # Save memory, use more compute
-        'optim': 'adamw_torch',             # Best optimizer for CPU
+        'learning_rate': 5e-4,      # Higher for faster convergence
+        'weight_decay': 0.01,       # Light regularization
+        'num_train_epochs': 3,      # FEW epochs (main speed factor)
+        'per_device_train_batch_size': 8,    # Larger batches = faster
+        'gradient_accumulation_steps': 2,    # Small for speed
+        'warmup_steps': 10,         # Minimal warmup
+        'save_steps': 50,           # Less frequent saves
+        'logging_steps': 5,         # Minimal logging
+        'max_grad_norm': 1.0,       # Less restrictive
+        'dataloader_num_workers': 8,  # ALL available cores
+        'lr_scheduler_type': 'constant',  # Simple = faster
+        'eval_steps': None,         # NO evaluation during training
+        'save_total_limit': 1,      # Keep only latest checkpoint
+        'load_best_model_at_end': False,  # Skip best model selection
+        'dataloader_pin_memory': False,
+        'fp16': False,
+        'bf16': False,
+        'tf32': False,
+        'gradient_checkpointing': False,  # OFF for speed
+        'optim': 'adamw_torch_fused',     # Faster optimizer
         'adam_beta1': 0.9,
-        'adam_beta2': 0.95,                 # Better for long training
+        'adam_beta2': 0.999,
         'adam_epsilon': 1e-8,
+        'max_steps': 100,           # MAXIMUM 100 steps for speed
     }
 
-    logger.info(f"[MAX] Using {max_workers} CPU workers for maximum parallelization")
-    logger.info(f"[MAX] Effective batch size: {params['per_device_train_batch_size'] * params['gradient_accumulation_steps']}")
-    logger.info(f"[MAX] Estimated training time: 8-12 hours for maximum quality")
+    logger.info(f"[SPEED] Target: 10-20 minute training")
+    logger.info(f"[SPEED] Using MAX steps: {params['max_steps']} (early stopping)")
 
-    # Adjust for dataset size
-    if num_conversations < 1000:
+    # Adjust based on dataset size
+    if num_conversations < 500:
         params.update({
-            'learning_rate': 1e-5,
-            'num_train_epochs': 8,
-            'warmup_steps': 50,
+            'num_train_epochs': 2,
+            'max_steps': 50,
         })
-        logger.info("[SMALL] Small dataset: Conservative parameters")
+        logger.info("[TINY] Very small dataset: ultra-fast training")
 
-    elif num_conversations > 5000:
+    elif num_conversations > 2000:
         params.update({
-            'learning_rate': 3e-5,
-            'num_train_epochs': 20,
-            'warmup_steps': 500,
+            'per_device_train_batch_size': 4,  # Reduce for memory
+            'max_steps': 150,  # Slightly more for larger dataset
         })
-        logger.info("[LARGE] Large dataset: Extended training")
+        logger.info("[MEDIUM] Medium dataset: adjusted for size")
 
     return params
 

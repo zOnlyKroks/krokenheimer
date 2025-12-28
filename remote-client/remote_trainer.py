@@ -195,7 +195,7 @@ class RemoteTrainerClient:
         model_output.mkdir(exist_ok=True)
 
         # Prepare training command - CPU-only maximum quality training
-        venv_python = str(Path(__file__).parent / "venv" / "Scripts" / "python.exe")
+        venv_python = str("python.exe")
         cmd = [
             venv_python, "train_windows.py",
             training_data_path,
@@ -242,9 +242,9 @@ class RemoteTrainerClient:
 
             # Monitor progress with timeout
             start_time = time.time()
-            timeout_seconds = 7200  # 2 hours
+            timeout_seconds = 7200 * 20  # 40 hours
             last_activity = time.time()
-            activity_timeout = 300  # 5 minutes of no output = timeout
+            activity_timeout = 300 * 2  # 10 minutes of no output = timeout
 
             while process.poll() is None:
                 current_time = time.time()
