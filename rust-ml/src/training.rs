@@ -58,7 +58,7 @@ impl TrainingService {
         self.train_model(&model, &var_map, &tokenized_data, epochs, &config)?;
 
         // Save model
-        self.save_model(&model, &tokenizer, &config, output_path)?;
+        self.save_model(&model, &tokenizer, &config, &var_map, output_path)?;
 
         tracing::info!("Training completed successfully!");
         Ok(())
@@ -346,7 +346,7 @@ impl TrainingService {
 
         // Save model weights as SafeTensors
         // TODO: Implement proper model saving for SimpleTransformer
-        let weights_path = Path::new(output_path).join("model.safetensors");
+        let _weights_path = Path::new(output_path).join("model.safetensors");
         tracing::warn!("Model weight saving not implemented for SimpleTransformer yet");
 
         tracing::info!("Model saved successfully to: {}", output_path);

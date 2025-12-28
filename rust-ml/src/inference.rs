@@ -1,5 +1,5 @@
 use candle_core::{Device, Tensor, Result as CandleResult};
-use candle_nn::{Linear, Module, VarBuilder, ops::sigmoid};
+use candle_nn::{Linear, Module, VarBuilder};
 use tokenizers::Tokenizer;
 use anyhow::{Result, Context, anyhow};
 use std::path::Path;
@@ -207,7 +207,7 @@ impl InferenceService {
             let logits = self.model.forward(&current_tokens)?;
 
             // Get last token logits
-            let (batch_size, seq_len, vocab_size) = logits.dims3()?;
+            let (_batch_size, seq_len, _vocab_size) = logits.dims3()?;
             let next_token_logits = logits
                 .narrow(1, seq_len - 1, 1)?  // Get last position
                 .squeeze(1)?;  // Remove sequence dimension
@@ -230,8 +230,9 @@ impl InferenceService {
             };
 
             // Check for end token
-            if let Some(eos_token) = self.tokenizer.get_vocab(true).get("[SEP]")
-                .or_else(|| self.tokenizer.get_vocab(true).get("<|endoftext|>")) {
+            let vocab = self.tokenizer.get_vocab(true);
+            if let Some(eos_token) = vocab.get("[SEP]")
+                .or_else(|| vocab.get("<|endoftext|>")) {
                 if next_token == *eos_token {
                     break;
                 }

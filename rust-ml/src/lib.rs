@@ -78,7 +78,7 @@ fn generate_text(mut cx: FunctionContext) -> JsResult<JsString> {
 
 // Generate mention response
 fn generate_mention_response(mut cx: FunctionContext) -> JsResult<JsString> {
-    let context = cx.argument::<JsArray>(0)?;
+    let _context = cx.argument::<JsArray>(0)?;
     let message_content = cx.argument::<JsString>(1)?.value(&mut cx);
     let author_name = cx.argument::<JsString>(2)?.value(&mut cx);
 
