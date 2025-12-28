@@ -16,48 +16,26 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def setup_windows_environment(gpu_type: str = "rocm"):
-    """Setup Windows environment for training."""
-    logger.info(f"[WIN] Setting up Windows environment with {gpu_type.upper()} GPU...")
+def setup_windows_environment():
+    """Setup Windows environment for MAXIMUM CPU training."""
+    import multiprocessing
+    import os
 
-    if gpu_type.lower() == "rocm":
-        # ROCm setup for RX 5700 XT
-        os.environ['HSA_OVERRIDE_GFX_VERSION'] = '10.1.0'  # RX 5700 XT is gfx1010
-        os.environ['ROCM_PATH'] = r'C:\Program Files\AMD\ROCm\5.7'
-        os.environ['HIP_VISIBLE_DEVICES'] = '0'
+    logger.info("[WIN] Setting up Windows environment for MAXIMUM CPU PERFORMANCE...")
 
-        # Additional ROCm optimizations
-        os.environ['HCC_AMDGPU_TARGET'] = 'gfx1010'
-        os.environ['HSA_ENABLE_SDMA'] = '0'  # Disable SDMA for stability
+    # Set CPU optimization environment variables
+    os.environ['OMP_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
+    os.environ['MKL_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
+    os.environ['NUMEXPR_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
+    os.environ['OPENBLAS_NUM_THREADS'] = str(min(multiprocessing.cpu_count(), 16))
 
-        try:
-            import torch
-            if torch.cuda.is_available():
-                logger.info(f"[GPU] ROCm detected: {torch.cuda.get_device_name(0)}")
-                logger.info(f"[GPU] CUDA devices available: {torch.cuda.device_count()}")
-            else:
-                logger.warning("[WARNING] ROCm not detected, falling back to CPU")
-                gpu_type = "cpu"
-        except ImportError:
-            logger.warning("[WARNING] PyTorch not available, falling back to CPU")
-            gpu_type = "cpu"
+    # Disable any GPU usage
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
-    elif gpu_type.lower() == "directml":
-        # DirectML setup for Windows
-        os.environ['TORCH_DIRECTML_DEVICE'] = '0'
+    logger.info(f"[CPU] CPU-only mode with {multiprocessing.cpu_count()} cores")
+    logger.info(f"[CPU] OMP_NUM_THREADS: {os.environ.get('OMP_NUM_THREADS')}")
 
-        try:
-            import torch_directml
-            logger.info("[WIN] DirectML device available")
-        except ImportError:
-            logger.warning("[WARNING] DirectML not available, falling back to CPU")
-            gpu_type = "cpu"
-
-    else:
-        logger.info("[CPU] Using CPU training")
-        gpu_type = "cpu"
-
-    return gpu_type
+    return "cpu"
 
 def load_training_data(file_path: str):
     """Load training data from JSONL file."""
@@ -76,62 +54,60 @@ def load_training_data(file_path: str):
     logger.info(f"[SUCCESS] Loaded {len(conversations)} conversations")
     return conversations
 
-def calculate_dynamic_params(num_conversations: int, gpu_type: str):
-    """Calculate training parameters based on dataset size and hardware."""
-    logger.info(f"🧮 Calculating parameters for {num_conversations} conversations on {gpu_type}")
+def calculate_dynamic_params(num_conversations: int):
+    """Calculate training parameters for MAXIMUM QUALITY CPU training."""
+    logger.info(f"[CPU] Calculating parameters for {num_conversations} conversations on CPU")
 
-    # Base parameters
+    # MAXIMUM QUALITY CPU parameters - use ALL resources
+    import multiprocessing
+    max_workers = min(multiprocessing.cpu_count(), 12)  # All cores but cap for stability
+
     params = {
-        'learning_rate': 2e-5,
-        'weight_decay': 0.05,
-        'num_train_epochs': 10,
-        'per_device_train_batch_size': 2,
-        'gradient_accumulation_steps': 4,
-        'warmup_steps': 100,
-        'save_steps': 500,
-        'logging_steps': 50,
-        'max_grad_norm': 1.0,
-        'dataloader_num_workers': 0,  # Windows can be finicky with multiprocessing
+        'learning_rate': 2e-5,   # Lower for better convergence
+        'weight_decay': 0.1,     # Higher regularization
+        'num_train_epochs': 15,  # More epochs for quality
+        'per_device_train_batch_size': 12,    # Large batch (use more RAM)
+        'gradient_accumulation_steps': 16,    # Massive effective batch size
+        'warmup_steps': 300,     # Longer warmup for stability
+        'save_steps': 100,       # Frequent checkpointing
+        'logging_steps': 10,     # Detailed progress
+        'max_grad_norm': 0.3,    # Conservative gradient clipping
+        'dataloader_num_workers': max_workers,  # ALL CPU cores
+        'lr_scheduler_type': 'cosine',  # Better learning rate decay
+        'eval_steps': 200,       # Regular evaluation
+        'save_total_limit': 5,   # Keep more checkpoints
+        'load_best_model_at_end': True,  # Use best checkpoint
+        'dataloader_pin_memory': False,      # CPU doesn't need pinned memory
+        'fp16': False,                       # CPU prefers fp32
+        'bf16': False,                       # Ensure no mixed precision
+        'tf32': False,                       # Pure fp32 for CPU
+        'gradient_checkpointing': True,      # Save memory, use more compute
+        'optim': 'adamw_torch',             # Best optimizer for CPU
+        'adam_beta1': 0.9,
+        'adam_beta2': 0.95,                 # Better for long training
+        'adam_epsilon': 1e-8,
     }
+
+    logger.info(f"[MAX] Using {max_workers} CPU workers for maximum parallelization")
+    logger.info(f"[MAX] Effective batch size: {params['per_device_train_batch_size'] * params['gradient_accumulation_steps']}")
+    logger.info(f"[MAX] Estimated training time: 8-12 hours for maximum quality")
 
     # Adjust for dataset size
     if num_conversations < 1000:
         params.update({
             'learning_rate': 1e-5,
-            'weight_decay': 0.1,
-            'num_train_epochs': 5,
+            'num_train_epochs': 8,
             'warmup_steps': 50,
         })
-        logger.info("📊 Small dataset: Conservative parameters")
+        logger.info("[SMALL] Small dataset: Conservative parameters")
 
     elif num_conversations > 5000:
         params.update({
-            'learning_rate': 5e-5,
-            'weight_decay': 0.01,
-            'num_train_epochs': 15,
+            'learning_rate': 3e-5,
+            'num_train_epochs': 20,
             'warmup_steps': 500,
         })
-        logger.info("📊 Large dataset: Aggressive parameters")
-
-    # Adjust for hardware
-    if gpu_type == "cpu":
-        params.update({
-            'per_device_train_batch_size': 1,
-            'gradient_accumulation_steps': 8,
-            'dataloader_num_workers': 0,
-            'dataloader_pin_memory': False,
-        })
-        logger.info("💻 CPU mode: Reduced batch size")
-
-    elif gpu_type in ["rocm", "directml"]:
-        # RX 5700 XT has 8GB VRAM, be conservative
-        params.update({
-            'per_device_train_batch_size': 4,
-            'gradient_accumulation_steps': 2,
-            'dataloader_pin_memory': True,
-            'fp16': False,  # AMD GPUs can be finicky with FP16
-        })
-        logger.info("[GPU] GPU mode: Optimized for RX 5700 XT")
+        logger.info("[LARGE] Large dataset: Extended training")
 
     return params
 
@@ -195,32 +171,37 @@ def setup_model_and_trainer(conversations, tokenizer_path: str, output_dir: Path
         tokenizer = GPT2TokenizerFast(tokenizer_file=tokenizer_path)
         tokenizer.pad_token = tokenizer.eos_token
 
-        # Create model config - smaller for RX 5700 XT
+        # LARGE MODEL CONFIG - maximum quality for CPU training
         config = GPT2Config(
             vocab_size=tokenizer.vocab_size,
-            n_positions=512,  # Reduced context length for memory
-            n_embd=512,       # Reduced embedding size
-            n_layer=8,        # Reduced layers
-            n_head=8,         # Reduced attention heads
+            n_positions=1024,  # Longer context for better understanding
+            n_embd=768,        # Larger embedding (GPT-2 medium size)
+            n_layer=16,        # More layers for better learning
+            n_head=12,         # More attention heads
             bos_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
+            dropout=0.1,       # Some dropout for regularization
+            resid_pdrop=0.1,   # Residual dropout
+            embd_pdrop=0.1,    # Embedding dropout
         )
 
-        logger.info(f"🏗️ Model config: {config.n_layer} layers, {config.n_embd} embedding size")
+        logger.info(f"[LARGE] Model config: {config.n_layer} layers, {config.n_embd} embedding size, {config.n_positions} context")
+        logger.info(f"[LARGE] Model parameters: ~{(config.n_layer * config.n_embd * config.n_embd * 4 + config.vocab_size * config.n_embd) // 1000000}M parameters")
 
         # Initialize model
         model = GPT2LMHeadModel(config)
 
-        # Move to appropriate device
-        device = "cpu"
-        if gpu_type == "rocm":
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        elif gpu_type == "directml":
-            import torch_directml
-            device = torch_directml.device()
-
+        # FORCE CPU DEVICE - maximum CPU optimization
+        device = torch.device("cpu")
         model = model.to(device)
-        logger.info(f"🎯 Model moved to device: {device}")
+
+        # Set CPU optimization flags
+        torch.set_num_threads(min(multiprocessing.cpu_count(), 16))  # Use all cores
+        torch.set_num_interop_threads(min(multiprocessing.cpu_count(), 4))
+
+        logger.info(f"[CPU] Model forced to CPU device: {device}")
+        logger.info(f"[CPU] PyTorch threads: {torch.get_num_threads()}")
+        logger.info(f"[CPU] Interop threads: {torch.get_num_interop_threads()}")
 
         # Prepare dataset
         def tokenize_function(examples):
@@ -254,7 +235,7 @@ def setup_model_and_trainer(conversations, tokenizer_path: str, output_dir: Path
             mlm=False,
         )
 
-        # Training arguments
+        # Training arguments with proper device handling
         training_args = TrainingArguments(
             output_dir=str(output_dir / "checkpoints"),
             num_train_epochs=params['num_train_epochs'],
@@ -274,9 +255,16 @@ def setup_model_and_trainer(conversations, tokenizer_path: str, output_dir: Path
             fp16=params.get('fp16', False),
             logging_dir=str(output_dir / "logs"),
             report_to=[],  # Disable wandb/tensorboard
+            no_cuda=False if str(device).startswith(('cuda', 'privateuseone')) else True,  # Force GPU usage
+            max_steps=params.get('max_steps', -1),  # Add max_steps support
         )
 
-        # Create trainer
+        # Log device information for debugging
+        logger.info(f"[DEVICE] Training device: {device}")
+        logger.info(f"[DEVICE] CUDA available: {torch.cuda.is_available()}")
+        logger.info(f"[DEVICE] no_cuda setting: {training_args.no_cuda}")
+
+        # Create trainer with device placement
         trainer = Trainer(
             model=model,
             args=training_args,
@@ -284,6 +272,11 @@ def setup_model_and_trainer(conversations, tokenizer_path: str, output_dir: Path
             train_dataset=tokenized_dataset,
             tokenizer=tokenizer,
         )
+
+        # Force model to GPU if DirectML
+        if str(device).startswith('privateuseone'):
+            trainer.model = trainer.model.to(device)
+            logger.info(f"[FORCE] Forced model back to DirectML device: {device}")
 
         return trainer, model, tokenizer
 
@@ -338,23 +331,20 @@ def train_model(trainer, model, tokenizer, output_dir: Path):
         return False
 
 def main():
-    parser = argparse.ArgumentParser(description="Windows Training Script for RX 5700 XT")
+    parser = argparse.ArgumentParser(description="MAXIMUM QUALITY CPU Training Script")
     parser.add_argument("training_data", help="Path to training data JSONL file")
     parser.add_argument("output_dir", help="Output directory for trained model")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
-    parser.add_argument("--gpu-type", choices=["rocm", "directml", "cpu"], default="rocm",
-                        help="GPU type to use")
+    parser.add_argument("--epochs", type=int, default=15, help="Number of training epochs (CPU optimized)")
 
     args = parser.parse_args()
 
-    logger.info("🏁 Starting Windows training script...")
-    logger.info(f"📂 Training data: {args.training_data}")
-    logger.info(f"📂 Output directory: {args.output_dir}")
-    logger.info(f"🔢 Epochs: {args.epochs}")
-    logger.info(f"🎮 GPU type: {args.gpu_type}")
+    logger.info("[START] Starting MAXIMUM QUALITY CPU training...")
+    logger.info(f"[DATA] Training data: {args.training_data}")
+    logger.info(f"[OUTPUT] Output directory: {args.output_dir}")
+    logger.info(f"[EPOCHS] Epochs: {args.epochs}")
 
-    # Setup environment
-    gpu_type = setup_windows_environment(args.gpu_type)
+    # Setup CPU-optimized environment
+    setup_windows_environment()
 
     # Create output directory
     output_dir = Path(args.output_dir)
@@ -368,7 +358,7 @@ def main():
             sys.exit(1)
 
         # Calculate training parameters
-        params = calculate_dynamic_params(len(conversations), gpu_type)
+        params = calculate_dynamic_params(len(conversations))
         params['num_train_epochs'] = args.epochs
 
         # Create tokenizer

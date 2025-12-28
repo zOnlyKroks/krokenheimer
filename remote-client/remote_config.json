@@ -21,16 +21,12 @@
   "min_messages_threshold": 1000,
   "_note_min_messages": "Minimum new messages before training starts",
 
-  "_section3": "=== HARDWARE SETTINGS (RX 5700 XT) ===",
-  "gpu_enabled": true,
-  "_note_gpu_enabled": "Use GPU acceleration",
-
-  "gpu_type": "directml",
-  "_note_gpu_type": "rocm (best for RX 5700 XT), directml (fallback), cpu (slow)",
+  "_section3": "=== HARDWARE SETTINGS (CPU ONLY) ===",
+  "_note_hardware": "GPU support removed - using maximum quality CPU training",
 
   "_section4": "=== TRAINING PARAMETERS ===",
-  "max_epochs": 10,
-  "_note_max_epochs": "Number of training epochs (10 is good default)",
+  "max_epochs": 15,
+  "_note_max_epochs": "Number of training epochs (15 for maximum quality CPU training)",
 
   "upload_trained_model": true,
   "_note_upload": "Upload trained model back to Discord bot",

@@ -184,47 +184,23 @@ class RemoteTrainerClient:
             logger.error(f"[ERROR] Failed to download training data: {e}")
             return None
 
-    def setup_gpu_environment(self):
-        """Setup GPU environment for RX 5700 XT."""
-        logger.info("[GPU] Setting up GPU environment for RX 5700 XT...")
-
-        gpu_type = self.config.get('gpu_type', 'rocm').lower()
-
-        if gpu_type == 'rocm':
-            # ROCm environment variables for RX 5700 XT
-            os.environ['HSA_OVERRIDE_GFX_VERSION'] = '10.1.0'  # RX 5700 XT gfx1010
-            os.environ['ROCM_PATH'] = r'C:\Program Files\AMD\ROCm\5.7'
-            os.environ['HIP_VISIBLE_DEVICES'] = '0'
-            logger.info("[GPU] ROCm environment configured for RX 5700 XT")
-
-        elif gpu_type == 'directml':
-            # DirectML for Windows fallback
-            os.environ['TORCH_DIRECTML_DEVICE'] = '0'
-            logger.info("[GPU] DirectML environment configured")
-
-        else:
-            logger.warning("[WARNING] Unknown GPU type, using CPU fallback")
 
     def train_model(self, training_data_path: str) -> Optional[str]:
-        """Train model locally using Windows-optimized script."""
-        logger.info("[TRAIN] Starting model training...")
-
-        # Setup GPU environment
-        self.setup_gpu_environment()
+        """Train model locally using CPU-optimized maximum quality training."""
+        logger.info("[TRAIN] Starting MAXIMUM QUALITY CPU training...")
 
         # Model output path
         model_name = f"krokenheimer_v{int(time.time())}"
         model_output = self.models_dir / model_name
         model_output.mkdir(exist_ok=True)
 
-        # Prepare training command - use venv Python
+        # Prepare training command - CPU-only maximum quality training
         venv_python = str(Path(__file__).parent / "venv" / "Scripts" / "python.exe")
         cmd = [
             venv_python, "train_windows.py",
             training_data_path,
             str(model_output),
-            "--epochs", str(self.config.get('max_epochs', 10)),
-            "--gpu-type", self.config.get('gpu_type', 'rocm')
+            "--epochs", str(self.config.get('max_epochs', 15))  # More epochs for quality
         ]
 
         try:
