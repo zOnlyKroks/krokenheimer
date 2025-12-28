@@ -1,0 +1,42 @@
+# Node
+node_modules/
+npm-debug.log
+dist/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Data
+data/
+chroma_data/
+*.db
+*.db-journal
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.gguf
+*.safetensors
+checkpoints/
+models/
