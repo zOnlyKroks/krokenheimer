@@ -98,7 +98,8 @@ impl MultiHeadAttention {
     fn forward(&self, x: &Tensor) -> CandleResult<Tensor> {
         let qkv = self.c_attn.forward(x)?;
         // Simplified attention - in a real implementation you'd do proper multi-head attention
-        let output = &qkv * 0.333?; // Simple averaging instead of proper attention
+        let scale_factor = Tensor::new(&[0.333f32], qkv.device())?;
+        let output = (&qkv * &scale_factor)?; // Simple averaging instead of proper attention
         self.c_proj.forward(&output)
     }
 }
@@ -106,8 +107,18 @@ impl MultiHeadAttention {
 impl MLP {
     fn forward(&self, x: &Tensor) -> CandleResult<Tensor> {
         let x = self.c_fc.forward(x)?;
-        let x = candle_nn::ops::gelu(&x)?;
+        // Simple GELU approximation using tanh
+        let x = self.gelu_approximation(&x)?;
         self.c_proj.forward(&x)
+    }
+
+    fn gelu_approximation(&self, x: &Tensor) -> CandleResult<Tensor> {
+        // GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+        // Simplified approximation: x * sigmoid(1.702 * x)
+        let scale = Tensor::new(&[1.702f32], x.device())?;
+        let scaled_x = (x * &scale)?;
+        let sigmoid_x = candle_nn::ops::sigmoid(&scaled_x)?;
+        x * &sigmoid_x
     }
 }
 
@@ -203,7 +214,8 @@ impl InferenceService {
 
             // Apply temperature
             let scaled_logits = if temperature > 0.0 {
-                (&next_token_logits / temperature)?
+                let temp_tensor = Tensor::new(&[temperature], next_token_logits.device())?;
+                (&next_token_logits / &temp_tensor)?
             } else {
                 next_token_logits
             };

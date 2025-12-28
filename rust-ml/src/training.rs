@@ -1,6 +1,6 @@
 use candle_core::{Device, Tensor, Result as CandleResult};
 use candle_nn::{VarBuilder, VarMap, Optimizer, AdamW, loss::cross_entropy, Activation};
-use tokenizers::{Tokenizer, models::bpe::BPE, pre_tokenizers::byte_level::ByteLevel,
+use tokenizers::{Tokenizer, pre_tokenizers::byte_level::ByteLevel,
                  decoders::byte_level::ByteLevel as ByteLevelDecoder,
                  processors::byte_level::ByteLevel as ByteLevelProcessor};
 use anyhow::{Result, Context, anyhow};
@@ -202,7 +202,7 @@ impl TrainingService {
         var_map: &VarMap,
         tokenized_data: &[Vec<u32>],
         epochs: u32,
-        config: &Gpt2Config,
+        _config: &Gpt2Config,
     ) -> Result<()> {
         tracing::info!("Starting model training...");
 
@@ -331,7 +331,7 @@ impl TrainingService {
         cross_entropy(&logits_flat, &labels_flat)
     }
 
-    fn save_model(&self, model: &SimpleTransformer, tokenizer: &Tokenizer, config: &Gpt2Config, output_path: &str) -> Result<()> {
+    fn save_model(&self, _model: &SimpleTransformer, _tokenizer: &Tokenizer, config: &Gpt2Config, output_path: &str) -> Result<()> {
         tracing::info!("Saving model to: {}", output_path);
 
         std::fs::create_dir_all(output_path)
