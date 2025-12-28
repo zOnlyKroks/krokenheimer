@@ -6,7 +6,6 @@ import vectorStoreService from '../services/VectorStoreService.js';
 import rustMLService from '../services/RustMLService.js';
 import fineTuningService from '../services/FineTuningService.js';
 import trainingConfig from '../config/trainingConfig.js';
-import remoteTrainingConfig from '../config/remoteTrainingConfig.js';
 import cron from 'node-cron';
 import { MessageGenerationConfig } from '../types/llm.js';
 
@@ -88,9 +87,8 @@ export class LLMPlugin implements BotPlugin {
 
     console.log('🤖 Initializing LLM Plugin...');
 
-    // Initialize remote training config after dotenv has loaded
-    console.log('🔧 Initializing remote training configuration...');
-    remoteTrainingConfig.initialize();
+    // Remote training API has been replaced with local Rust ML training
+    console.log('🦀 Using local Rust ML training (remote training API disabled)');
 
     // Initialize Rust ML service and check for trained model
     console.log('1️⃣  Initializing Rust ML service...');
@@ -715,25 +713,25 @@ ${channelList}
       // Show training status for remote architecture
       const status = fineTuningService.getTrainingStatus();
       const stats = await fineTuningService.getTrainingStats();
-      const remoteConfig = remoteTrainingConfig.getStatusInfo();
+      // Using local Rust ML instead of remote training API
 
-      let statusText = `**🎓 Remote Training Status**\n\n`;
+      let statusText = `**🦀 Rust ML Training Status**\n\n`;
 
       statusText += `• Current model: ${fineTuningService.getCurrentModelName()}\n`;
       statusText += `• Total messages: ${stats.totalMessages}\n`;
       statusText += `• New messages: ${stats.newMessages}\n`;
       statusText += `• Model version: v${stats.modelVersion}\n`;
-      statusText += `• Training active: ${status.isTraining ? '🔄 Yes (remote)' : '💤 No'}\n`;
+      statusText += `• Training active: ${status.isTraining ? '🔄 Yes (local)' : '💤 No'}\n`;
 
       if (stats.lastTrainDate) {
         const lastTrainDate = new Date(stats.lastTrainDate).toLocaleDateString();
         statusText += `• Last training: ${lastTrainDate}\n`;
       }
 
-      statusText += `\n**🌐 Remote Training System:**\n`;
-      statusText += `• API Status: ${remoteConfig.apiEnabled ? '✅ Active' : '❌ Disabled'}\n`;
-      statusText += `• API Port: ${remoteConfig.apiPort}\n`;
-      statusText += `• Min Messages: ${remoteConfig.minMessagesThreshold}\n`;
+      statusText += `\n**🦀 Local Rust ML System:**\n`;
+      statusText += `• Method: Local training (no API)\n`;
+      statusText += `• Min Messages: 1000\n`;
+      statusText += `• Processing: CPU-based\n`;
 
       // If training is in progress, show detailed progress
       if (status.isTraining) {
@@ -742,7 +740,7 @@ ${channelList}
           20
         );
 
-        statusText += `\n**📊 Active Remote Training:**\n`;
+        statusText += `\n**📊 Active Training:**\n`;
         statusText += `• Phase: ${this.getPhaseEmoji(status.phase)} ${status.phase}\n`;
         statusText += `• Step: ${status.currentStep}/${status.totalSteps}\n`;
         statusText += `• Epoch: ${status.currentEpoch}/${status.totalEpochs}\n`;
@@ -754,9 +752,9 @@ ${channelList}
       }
 
       statusText += `\n**💡 Commands:**\n`;
-      statusText += `• \`!llmremote status\` - Remote API details\n`;
-      statusText += `• \`!llmremote logs\` - Training activity\n`;
-      statusText += `• \`!llmremote test\` - Test API connection\n`;
+      statusText += `• \`!llmtrain now\` - Start training\n`;
+      statusText += `• \`!llmtrain status\` - Check status\n`;
+      statusText += `• \`!llmstats\` - View statistics\n`;
 
       await message.reply(statusText);
       return;
@@ -766,9 +764,8 @@ ${channelList}
       const command = args[0].toLowerCase();
 
     if (command === 'now') {
-      // Training is now exclusively handled by remote clients
+      // Training is now handled by local Rust ML
       const stats = await fineTuningService.getTrainingStats();
-      const remoteConfig = remoteTrainingConfig.getStatusInfo();
 
       if (!remoteConfig.apiEnabled) {
         await message.reply(
@@ -814,7 +811,15 @@ ${channelList}
     } else if (command === 'force') {
       // Force immediate training
       const stats = await fineTuningService.getTrainingStats();
-      const remoteConfig = remoteTrainingConfig.getStatusInfo();
+      const remoteConfig = {
+        apiEnabled: false,
+        apiPort: 0,
+        authEnabled: false,
+        minMessagesThreshold: 1000,
+        trainingIntervalHours: 12,
+        preferredGpuType: 'rust-cpu',
+        loggingEnabled: true
+      };
 
       if (!remoteConfig.apiEnabled) {
         await message.reply(
@@ -1066,7 +1071,15 @@ ${channelList}
     await message.reply('🔍 Testing remote training API...');
 
     try {
-      const remoteConfig = remoteTrainingConfig.getStatusInfo();
+      const remoteConfig = {
+        apiEnabled: false,
+        apiPort: 0,
+        authEnabled: false,
+        minMessagesThreshold: 1000,
+        trainingIntervalHours: 12,
+        preferredGpuType: 'rust-cpu',
+        loggingEnabled: true
+      };
 
       if (!remoteConfig.apiEnabled) {
         await message.reply(
@@ -1126,7 +1139,15 @@ ${channelList}
    * Show remote training API status and configuration
    */
   private async showRemoteApiStatus(message: Message): Promise<void> {
-    const remoteConfig = remoteTrainingConfig.getStatusInfo();
+    const remoteConfig = {
+        apiEnabled: false,
+        apiPort: 0,
+        authEnabled: false,
+        minMessagesThreshold: 1000,
+        trainingIntervalHours: 12,
+        preferredGpuType: 'rust-cpu',
+        loggingEnabled: true
+      };
     const stats = await fineTuningService.getTrainingStats();
     const trainingStatus = fineTuningService.getTrainingStatus();
 

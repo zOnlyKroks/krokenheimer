@@ -150,7 +150,7 @@ impl InferenceService {
             .with_context(|| "Failed to parse model config")?;
 
         // Initialize model with weights
-        let var_map = candle_nn::VarMap::new();
+        let mut var_map = candle_nn::VarMap::new();
         let weights_path = Path::new(model_path).join("model.safetensors");
 
         if weights_path.exists() {
