@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:www.youtube.com)",
       "WebSearch",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git update-index:*)"
     ]
   }
 }
