@@ -2,7 +2,7 @@
 REM Wrapper to run remote trainer with correct Python
 
 echo Starting remote training client...
-venv\Scripts\python.exe remote_trainer.py %*
+python.exe remote_trainer.py %*
 
 if errorlevel 1 (
     echo.

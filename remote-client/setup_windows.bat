@@ -27,34 +27,30 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM Activate virtual environment
-echo Activating virtual environment...
-call venv\Scripts\activate.bat
-
 REM Upgrade pip
 echo.
 echo Upgrading pip...
-venv\Scripts\python.exe -m pip install --upgrade pip
+python.exe -m pip install --upgrade pip
 
 REM Install ALL dependencies in one go
 echo.
 echo Installing all dependencies...
-venv\Scripts\python.exe -m pip install requests schedule torch torchvision torchaudio transformers tokenizers datasets numpy pandas tqdm pywin32
+python.exe -m pip install requests schedule torch torchvision torchaudio transformers tokenizers datasets numpy pandas tqdm pywin32
 
 REM Verify requests is installed
 echo.
 echo Verifying requests installation...
-venv\Scripts\python.exe -c "import requests; print('requests installed successfully')"
+python.exe -c "import requests; print('requests installed successfully')"
 if errorlevel 1 (
     echo ERROR: requests failed to install
     echo Trying alternative installation...
-    venv\Scripts\pip.exe install requests
+    pip.exe install requests
 )
 
 REM Try DirectML as optional
 echo.
 echo Attempting DirectML installation (optional GPU support)...
-venv\Scripts\python.exe -m pip install torch-directml
+python.exe -m pip install torch-directml
 if errorlevel 1 (
     echo DirectML not available - will use CPU fallback
 )
@@ -62,7 +58,7 @@ if errorlevel 1 (
 REM Final test
 echo.
 echo Testing all packages...
-venv\Scripts\python.exe -c "import requests, torch, transformers; print('All packages installed successfully!')"
+python.exe -c "import requests, torch, transformers; print('All packages installed successfully!')"
 if errorlevel 1 (
     echo ERROR: Package verification failed
     pause

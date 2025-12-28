@@ -17,7 +17,7 @@ if not exist "remote_config.json" (
 )
 
 echo Testing connection to Discord bot...
-venv\Scripts\python.exe remote_trainer.py --test-connection
+python.exe remote_trainer.py --test-connection
 set EXIT_CODE=%ERRORLEVEL%
 echo Debug: Exit code was %EXIT_CODE%
 
@@ -47,6 +47,6 @@ echo Press Ctrl+C to stop
 echo.
 
 REM Start the daemon
-venv\Scripts\python.exe remote_trainer.py --daemon
+python.exe remote_trainer.py --daemon
 
 pause
