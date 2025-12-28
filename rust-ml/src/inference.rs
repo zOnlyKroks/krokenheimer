@@ -1,7 +1,7 @@
 use candle_core::{Device, Tensor, Result as CandleResult};
-use candle_nn::{Linear, Module, VarBuilder};
+use candle_nn::{Linear, Module, VarBuilder, ops::sigmoid};
 use tokenizers::Tokenizer;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, Context, anyhow};
 use std::path::Path;
 use serde_json;
 use crate::model::Gpt2Config;
@@ -34,7 +34,7 @@ struct MLP {
 }
 
 impl SimpleTransformer {
-    pub fn load(weights: &std::collections::HashMap<String, Tensor>, config: &Gpt2Config, vb: VarBuilder) -> Result<Self, candle_core::Error> {
+    pub fn load(_weights: &std::collections::HashMap<String, Tensor>, config: &Gpt2Config, vb: VarBuilder) -> Result<Self, candle_core::Error> {
         // This is a simplified implementation - for a real model you'd need proper weight loading
         let embedding = candle_nn::embedding(config.vocab_size, config.n_embd, vb.pp("wte"))?;
         let ln_f = candle_nn::layer_norm(config.n_embd, config.layer_norm_epsilon, vb.pp("ln_f"))?;
@@ -90,7 +90,7 @@ impl TransformerLayer {
         let residual = x.clone();
         let x = self.ln_2.forward(&x)?;
         let mlp_output = self.mlp.forward(&x)?;
-        (&residual + &mlp_output)
+        &residual + &mlp_output
     }
 }
 
