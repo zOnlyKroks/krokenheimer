@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def setup_windows_environment(gpu_type: str = "rocm"):
     """Setup Windows environment for training."""
-    logger.info(f"🪟 Setting up Windows environment with {gpu_type.upper()} GPU...")
+    logger.info(f"[WIN] Setting up Windows environment with {gpu_type.upper()} GPU...")
 
     if gpu_type.lower() == "rocm":
         # ROCm setup for RX 5700 XT
@@ -33,13 +33,13 @@ def setup_windows_environment(gpu_type: str = "rocm"):
         try:
             import torch
             if torch.cuda.is_available():
-                logger.info(f"🔥 ROCm detected: {torch.cuda.get_device_name(0)}")
-                logger.info(f"🔥 CUDA devices available: {torch.cuda.device_count()}")
+                logger.info(f"[GPU] ROCm detected: {torch.cuda.get_device_name(0)}")
+                logger.info(f"[GPU] CUDA devices available: {torch.cuda.device_count()}")
             else:
-                logger.warning("⚠️ ROCm not detected, falling back to CPU")
+                logger.warning("[WARNING] ROCm not detected, falling back to CPU")
                 gpu_type = "cpu"
         except ImportError:
-            logger.warning("⚠️ PyTorch not available, falling back to CPU")
+            logger.warning("[WARNING] PyTorch not available, falling back to CPU")
             gpu_type = "cpu"
 
     elif gpu_type.lower() == "directml":
@@ -48,13 +48,13 @@ def setup_windows_environment(gpu_type: str = "rocm"):
 
         try:
             import torch_directml
-            logger.info("🪟 DirectML device available")
+            logger.info("[WIN] DirectML device available")
         except ImportError:
-            logger.warning("⚠️ DirectML not available, falling back to CPU")
+            logger.warning("[WARNING] DirectML not available, falling back to CPU")
             gpu_type = "cpu"
 
     else:
-        logger.info("💻 Using CPU training")
+        logger.info("[CPU] Using CPU training")
         gpu_type = "cpu"
 
     return gpu_type
@@ -73,7 +73,7 @@ def load_training_data(file_path: str):
             except json.JSONDecodeError as e:
                 logger.warning(f"Skipping invalid JSON line: {e}")
 
-    logger.info(f"✅ Loaded {len(conversations)} conversations")
+    logger.info(f"[SUCCESS] Loaded {len(conversations)} conversations")
     return conversations
 
 def calculate_dynamic_params(num_conversations: int, gpu_type: str):
@@ -131,7 +131,7 @@ def calculate_dynamic_params(num_conversations: int, gpu_type: str):
             'dataloader_pin_memory': True,
             'fp16': False,  # AMD GPUs can be finicky with FP16
         })
-        logger.info("🎮 GPU mode: Optimized for RX 5700 XT")
+        logger.info("[GPU] GPU mode: Optimized for RX 5700 XT")
 
     return params
 

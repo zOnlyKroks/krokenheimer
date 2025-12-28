@@ -229,20 +229,106 @@ class RemoteTrainerClient:
 
         try:
             logger.info(f"[EXEC] Running: {' '.join(cmd)}")
-            result = subprocess.run(
+            logger.info("[STATUS] Starting training process with real-time output...")
+
+            # Start process with real-time output
+            process = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=7200  # 2 hour timeout
+                bufsize=1,
+                universal_newlines=True
             )
 
-            if result.returncode == 0:
+            # Monitor output in real-time
+            import threading
+            import queue
+
+            def read_output(pipe, q, prefix):
+                for line in iter(pipe.readline, ''):
+                    if line.strip():
+                        q.put(f"[{prefix}] {line.strip()}")
+                pipe.close()
+
+            # Create queues for stdout and stderr
+            stdout_queue = queue.Queue()
+            stderr_queue = queue.Queue()
+
+            # Start threads to read output
+            stdout_thread = threading.Thread(target=read_output, args=(process.stdout, stdout_queue, "TRAIN"))
+            stderr_thread = threading.Thread(target=read_output, args=(process.stderr, stderr_queue, "TRAIN"))
+
+            stdout_thread.daemon = True
+            stderr_thread.daemon = True
+            stdout_thread.start()
+            stderr_thread.start()
+
+            # Monitor progress with timeout
+            start_time = time.time()
+            timeout_seconds = 7200  # 2 hours
+            last_activity = time.time()
+            activity_timeout = 300  # 5 minutes of no output = timeout
+
+            while process.poll() is None:
+                current_time = time.time()
+
+                # Check for timeout
+                if current_time - start_time > timeout_seconds:
+                    logger.error("[ERROR] Training timed out after 2 hours")
+                    process.terminate()
+                    return None
+
+                # Check for activity timeout
+                if current_time - last_activity > activity_timeout:
+                    logger.warning("[WARNING] No training output for 5 minutes - process may be stuck")
+                    last_activity = current_time  # Reset to avoid spam
+
+                # Read and display output
+                try:
+                    while True:
+                        try:
+                            line = stdout_queue.get_nowait()
+                            logger.info(line)
+                            last_activity = current_time
+                        except queue.Empty:
+                            break
+
+                    while True:
+                        try:
+                            line = stderr_queue.get_nowait()
+                            logger.info(line)
+                            last_activity = current_time
+                        except queue.Empty:
+                            break
+
+                except Exception:
+                    pass
+
+                # Brief sleep to avoid busy waiting
+                time.sleep(0.5)
+
+            # Wait for threads to finish
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+
+            # Get final return code
+            return_code = process.wait()
+
+            # Read any remaining output
+            try:
+                while not stdout_queue.empty():
+                    logger.info(stdout_queue.get_nowait())
+                while not stderr_queue.empty():
+                    logger.info(stderr_queue.get_nowait())
+            except:
+                pass
+
+            if return_code == 0:
                 logger.info("[SUCCESS] Training completed successfully!")
                 return str(model_output)
             else:
-                logger.error(f"[ERROR] Training failed with code {result.returncode}")
-                logger.error(f"stdout: {result.stdout}")
-                logger.error(f"stderr: {result.stderr}")
+                logger.error(f"[ERROR] Training failed with code {return_code}")
                 return None
 
         except subprocess.TimeoutExpired:
