@@ -217,9 +217,10 @@ class RemoteTrainerClient:
         model_output = self.models_dir / model_name
         model_output.mkdir(exist_ok=True)
 
-        # Prepare training command
+        # Prepare training command - use venv Python
+        venv_python = str(Path(__file__).parent / "venv" / "Scripts" / "python.exe")
         cmd = [
-            "python", "train_windows.py",
+            venv_python, "train_windows.py",
             training_data_path,
             str(model_output),
             "--epochs", str(self.config.get('max_epochs', 10)),
