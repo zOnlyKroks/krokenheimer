@@ -1,13 +1,12 @@
 use candle_core::{Device, Tensor, Result as CandleResult};
 use candle_transformers::models::gpt2::{Gpt2, Config as Gpt2Config};
-use candle_nn::{VarBuilder, VarMap, Optimizer, AdamW, loss::cross_entropy};
+use candle_nn::{VarBuilder, VarMap, Optimizer, AdamW, loss::cross_entropy, Activation};
 use tokenizers::{Tokenizer, models::bpe::BPE, pre_tokenizers::byte_level::ByteLevel,
                  decoders::byte_level::ByteLevel as ByteLevelDecoder, trainers::BpeTrainer,
                  processors::byte_level::ByteLevel as ByteLevelProcessor};
 use anyhow::{Result, Context, anyhow};
 use std::path::Path;
 use serde_json;
-use tokio::fs;
 
 pub struct TrainingService {
     device: Device,
@@ -53,17 +52,8 @@ impl TrainingService {
         let var_builder = VarBuilder::from_varmap(&var_map, candle_core::DType::F32, &self.device);
         let model = Gpt2::new(&config, var_builder)?;
 
-        // Create optimizer
-        let mut optimizer = AdamW::new(var_map.all_vars(), candle_nn::AdamWParams {
-            lr: 5e-4,
-            beta1: 0.9,
-            beta2: 0.999,
-            eps: 1e-8,
-            weight_decay: 0.01,
-        })?;
-
         // Training loop
-        self.train_model(&model, &mut optimizer, &tokenized_data, epochs, &config)?;
+        self.train_model(&model, &var_map, &tokenized_data, epochs, &config)?;
 
         // Save model
         self.save_model(&model, &tokenizer, &config, output_path)?;
@@ -117,10 +107,10 @@ impl TrainingService {
         let mut tokenizer = Tokenizer::new(BPE::default());
 
         // Set pre-tokenizer
-        tokenizer.with_pre_tokenizer(ByteLevel::new(false, false));
+        tokenizer.with_pre_tokenizer(Some(ByteLevel::new(false, false, true)));
 
         // Set decoder
-        tokenizer.with_decoder(ByteLevelDecoder::new());
+        tokenizer.with_decoder(Some(ByteLevelDecoder::new(false, false, true)));
 
         // Create trainer
         let mut trainer = BpeTrainer::builder()
@@ -135,11 +125,25 @@ impl TrainingService {
             .build();
 
         // Train tokenizer
-        tokenizer.train_from_iterator(&mut texts.iter().map(|s| s.as_str()), &mut trainer)
+        // Write texts to temporary files for training
+        let temp_dir = std::env::temp_dir().join("tokenizer_training");
+        std::fs::create_dir_all(&temp_dir)?;
+        let mut temp_files = Vec::new();
+
+        for (i, text) in texts.iter().enumerate() {
+            let temp_file = temp_dir.join(format!("text_{}.txt", i));
+            std::fs::write(&temp_file, text)?;
+            temp_files.push(temp_file.to_string_lossy().to_string());
+        }
+
+        tokenizer.train(&temp_files, Some(&mut trainer))
             .map_err(|e| anyhow!("Tokenizer training failed: {}", e))?;
 
+        // Clean up temp files
+        std::fs::remove_dir_all(&temp_dir).ok();
+
         // Set post-processor
-        tokenizer.with_post_processor(ByteLevelProcessor::new(false));
+        tokenizer.with_post_processor(Some(ByteLevelProcessor::new(false, false, true)));
 
         // Save tokenizer
         let tokenizer_path = Path::new(output_path).join("tokenizer.json");
@@ -186,7 +190,7 @@ impl TrainingService {
             n_layer: 12,
             n_head: 12,
             n_inner: Some(3072),
-            activation_function: candle_transformers::models::gpt2::Activation::Gelu,
+            activation_function: Activation::Gelu,
             resid_pdrop: 0.1,
             embd_pdrop: 0.1,
             attn_pdrop: 0.1,
@@ -225,7 +229,9 @@ impl TrainingService {
                 // Prepare batch tensors
                 let (input_ids, labels) = self.prepare_batch(batch, max_sequence_length)?;
 
-                if input_ids.is_empty() {
+                // Check if batch is empty by checking tensor dimensions
+                let batch_dims = input_ids.dims();
+                if batch_dims.len() == 0 || batch_dims.iter().any(|&d| d == 0) {
                     continue;
                 }
 
