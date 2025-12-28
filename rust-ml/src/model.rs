@@ -1,9 +1,29 @@
 // Model utilities and configuration
-use candle_transformers::models::gpt2::Config as Gpt2Config;
 use candle_nn::Activation;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use std::path::Path;
+
+// Define our own GPT-2 config since candle_transformers::models::gpt2 is not available
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Gpt2Config {
+    pub vocab_size: usize,
+    pub n_positions: usize,
+    pub n_embd: usize,
+    pub n_layer: usize,
+    pub n_head: usize,
+    pub n_inner: Option<usize>,
+    pub activation_function: Activation,
+    pub resid_pdrop: f64,
+    pub embd_pdrop: f64,
+    pub attn_pdrop: f64,
+    pub layer_norm_epsilon: f64,
+    pub initializer_range: f64,
+    pub scale_attn_weights: bool,
+    pub use_cache: bool,
+    pub scale_attn_by_inverse_layer_idx: bool,
+    pub reorder_and_upcast_attn: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelMetadata {

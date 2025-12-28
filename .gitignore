@@ -4,4 +4,4 @@ dist/
 data/
 chroma_data/
 *.log
-remote-client/venv/
+rust-ml/target/
