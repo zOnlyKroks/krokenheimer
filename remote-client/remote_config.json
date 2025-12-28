@@ -25,7 +25,7 @@
   "gpu_enabled": true,
   "_note_gpu_enabled": "Use GPU acceleration",
 
-  "gpu_type": "rocm",
+  "gpu_type": "directml",
   "_note_gpu_type": "rocm (best for RX 5700 XT), directml (fallback), cpu (slow)",
 
   "_section4": "=== TRAINING PARAMETERS ===",
