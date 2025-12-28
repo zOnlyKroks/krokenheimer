@@ -119,16 +119,7 @@ COPY docker-supervisord.conf /etc/supervisor/supervisord.conf
 # Verify Rust ML module integration
 RUN echo "🧪 Testing Rust ML module..." && \
     cd /app && \
-    node -e "
-    try {
-      const rustML = require('./rust-ml/index.node');
-      console.log('✅ Rust ML module loaded successfully');
-      console.log('📊 Available functions:', Object.keys(rustML));
-    } catch (error) {
-      console.log('⚠️  Rust ML module not available:', error.message);
-      console.log('🔄 Will run in fallback mode');
-    }
-    " || echo "⚠️  Node.js test failed - will run in fallback mode"
+    node -e "try { const rustML = require('./rust-ml/index.node'); console.log('✅ Rust ML module loaded successfully'); console.log('📊 Available functions:', Object.keys(rustML)); } catch (error) { console.log('⚠️  Rust ML module not available:', error.message); console.log('🔄 Will run in fallback mode'); }" || echo "⚠️  Node.js test failed - will run in fallback mode"
 
 EXPOSE 8000
 
