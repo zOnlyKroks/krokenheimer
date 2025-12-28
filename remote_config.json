@@ -1,1 +1,0 @@
-{"bot_host": "192.168.1.100", "bot_port": 3000, "auth_token": "your_secure_token_here", "training_interval_hours": 12, "min_messages_threshold": 1000, "gpu_enabled": true, "gpu_type": "directml", "max_epochs": 10, "upload_trained_model": true} 

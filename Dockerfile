@@ -41,7 +41,7 @@ RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import su
     echo 'exec /opt/chromadb-venv/bin/chroma run --host 0.0.0.0 --port 8000 --path "$1"' >> /usr/local/bin/run-chromadb && \
     chmod +x /usr/local/bin/run-chromadb
 
-# Create /app directory BEFORE trying to symlink to it
+# Create /app directory
 RUN mkdir -p /app
 
 WORKDIR /app
@@ -73,9 +73,6 @@ RUN npm prune --production
 
 # Create necessary directories
 RUN mkdir -p /app/data /app/chroma_data /app/data/models /app/data/checkpoints /var/log/supervisor
-
-# Make scripts executable
-RUN chmod +x /app/scripts/*.py /app/scripts/*.sh || true
 
 # Copy configuration files
 COPY wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh

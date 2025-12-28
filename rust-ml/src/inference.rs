@@ -149,27 +149,22 @@ impl InferenceService {
         let config: Gpt2Config = serde_json::from_str(&config_data)
             .with_context(|| "Failed to parse model config")?;
 
-        // Load model weights
-        let weights_path = Path::new(model_path).join("model.safetensors");
-        let weights = if weights_path.exists() {
-            // Try SafeTensors first (preferred)
-            candle_core::safetensors::load(&weights_path, &device)?
-        } else {
-            // Fallback to PyTorch format
-            let pytorch_path = Path::new(model_path).join("pytorch_model.bin");
-            if pytorch_path.exists() {
-                // For now, we'll need to convert PyTorch weights to Candle format
-                // This is a simplified implementation - in practice you'd need proper conversion
-                return Err(anyhow!("PyTorch model conversion not implemented yet. Please retrain with Candle."));
-            } else {
-                return Err(anyhow!("No model weights found in {}", model_path));
-            }
-        };
-
-        // Initialize model
+        // Initialize model with weights
         let var_map = candle_nn::VarMap::new();
+        let weights_path = Path::new(model_path).join("model.safetensors");
+
+        if weights_path.exists() {
+            // Load trained weights
+            var_map.load(&weights_path)
+                .map_err(|e| anyhow!("Failed to load model weights from {}: {}", weights_path.display(), e))?;
+            tracing::info!("Loaded trained model weights");
+        } else {
+            tracing::warn!("No trained weights found, using randomly initialized model");
+        }
+
         let var_builder = candle_nn::VarBuilder::from_varmap(&var_map, candle_core::DType::F32, &device);
-        let model = SimpleTransformer::load(&weights, &config, var_builder)
+        let empty_weights = std::collections::HashMap::new();
+        let model = SimpleTransformer::load(&empty_weights, &config, var_builder)
             .map_err(|e| anyhow!("Failed to initialize transformer model: {}", e))?;
 
         tracing::info!("Model loaded successfully with {} parameters", config.n_embd * config.n_layer);
