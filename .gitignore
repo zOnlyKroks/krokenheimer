@@ -4,3 +4,4 @@ dist/
 data/
 chroma_data/
 *.log
+remote-client/venv/
