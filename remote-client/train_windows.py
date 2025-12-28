@@ -5,12 +5,12 @@ Based on the original train_from_scratch.py but adapted for Windows and AMD GPU
 """
 
 import json
-import os
 import sys
 import time
 import argparse
 from pathlib import Path
 import logging
+import multiprocessing
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -66,13 +66,13 @@ def calculate_dynamic_params(num_conversations: int):
         'learning_rate': 2e-5,   # Lower for better convergence
         'weight_decay': 0.1,     # Higher regularization
         'num_train_epochs': 15,  # More epochs for quality
-        'per_device_train_batch_size': 12,    # Large batch (use more RAM)
-        'gradient_accumulation_steps': 16,    # Massive effective batch size
+        'per_device_train_batch_size': 6,    # Large batch (use more RAM)
+        'gradient_accumulation_steps': 8,    # Massive effective batch size
         'warmup_steps': 300,     # Longer warmup for stability
         'save_steps': 100,       # Frequent checkpointing
         'logging_steps': 10,     # Detailed progress
         'max_grad_norm': 0.3,    # Conservative gradient clipping
-        'dataloader_num_workers': max_workers,  # ALL CPU cores
+        'dataloader_num_workers': 2,  # ALL CPU cores
         'lr_scheduler_type': 'cosine',  # Better learning rate decay
         'eval_steps': 200,       # Regular evaluation
         'save_total_limit': 5,   # Keep more checkpoints
@@ -155,7 +155,7 @@ def create_tokenizer(conversations, output_dir: Path):
         logger.error(f"❌ Failed to create tokenizer: {e}")
         raise
 
-def setup_model_and_trainer(conversations, tokenizer_path: str, output_dir: Path, params: dict, gpu_type: str):
+def setup_model_and_trainer(conversations, tokenizer_path: str, output_dir: Path, params: dict):
     """Setup model and trainer for training."""
     logger.info("🧠 Setting up model and trainer...")
 
@@ -366,7 +366,7 @@ def main():
 
         # Setup model and trainer
         trainer, model, tokenizer = setup_model_and_trainer(
-            conversations, tokenizer_path, output_dir, params, gpu_type
+            conversations, tokenizer_path, output_dir, params
         )
 
         # Train model
