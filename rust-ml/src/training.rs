@@ -206,7 +206,7 @@ impl TrainingService {
     fn train_model(
         &self,
         model: &Gpt2,
-        optimizer: &mut AdamW,
+        var_map: &VarMap,
         tokenized_data: &[Vec<u32>],
         epochs: u32,
         config: &Gpt2Config,
@@ -215,6 +215,15 @@ impl TrainingService {
 
         let batch_size = 4;  // Small batch size for CPU training
         let max_sequence_length = 512;  // Limit sequence length for memory
+
+        // Create optimizer
+        let mut optimizer = AdamW::new(var_map.all_vars(), candle_nn::AdamWParams {
+            lr: 5e-4,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            weight_decay: 0.01,
+        })?;
 
         for epoch in 1..=epochs {
             tracing::info!("Epoch {}/{}", epoch, epochs);
@@ -244,9 +253,8 @@ impl TrainingService {
                 batch_count += 1;
 
                 // Backward pass
-                optimizer.zero_grad()?;
-                loss.backward()?;
-                optimizer.step()?;
+                let grads = loss.backward()?;
+                optimizer.step(&grads)?;
 
                 if batch_count % 10 == 0 {
                     tracing::info!("Batch {}: loss = {:.4}", batch_count, loss.to_scalar::<f32>()?);

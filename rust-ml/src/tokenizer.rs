@@ -15,21 +15,26 @@ impl TokenizerUtils {
 
     /// Get tokenizer vocabulary size
     pub fn get_vocab_size(tokenizer_path: &str) -> Result<usize> {
-        let tokenizer = Tokenizer::from_file(tokenizer_path)?;
+        let tokenizer = Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
         Ok(tokenizer.get_vocab_size(false))
     }
 
     /// Estimate token count for text
     pub fn estimate_tokens(tokenizer_path: &str, text: &str) -> Result<usize> {
-        let tokenizer = Tokenizer::from_file(tokenizer_path)?;
-        let encoding = tokenizer.encode(text, false)?;
+        let tokenizer = Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+        let encoding = tokenizer.encode(text, false)
+            .map_err(|e| anyhow::anyhow!("Failed to encode text: {}", e))?;
         Ok(encoding.len())
     }
 
     /// Truncate text to fit within token limit
     pub fn truncate_to_tokens(tokenizer_path: &str, text: &str, max_tokens: usize) -> Result<String> {
-        let tokenizer = Tokenizer::from_file(tokenizer_path)?;
-        let encoding = tokenizer.encode(text, false)?;
+        let tokenizer = Tokenizer::from_file(tokenizer_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+        let encoding = tokenizer.encode(text, false)
+            .map_err(|e| anyhow::anyhow!("Failed to encode text: {}", e))?;
 
         if encoding.len() <= max_tokens {
             return Ok(text.to_string());
@@ -37,7 +42,8 @@ impl TokenizerUtils {
 
         // Truncate tokens and decode back
         let truncated_ids: Vec<u32> = encoding.get_ids()[..max_tokens].to_vec();
-        let truncated_text = tokenizer.decode(&truncated_ids, false)?;
+        let truncated_text = tokenizer.decode(&truncated_ids, false)
+            .map_err(|e| anyhow::anyhow!("Failed to decode truncated text: {}", e))?;
 
         Ok(truncated_text)
     }
