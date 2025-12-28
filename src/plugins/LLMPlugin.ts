@@ -60,10 +60,10 @@ export class LLMPlugin implements BotPlugin {
       execute: this.showTrainingConfig.bind(this),
     },
     {
-      name: 'llmremote',
-      description: 'Manage remote training on Windows machine with AMD GPU',
-      usage: 'llmremote [test|status]',
-      execute: this.manageRemoteTraining.bind(this),
+      name: 'llmrust',
+      description: 'Manage local Rust ML training system',
+      usage: 'llmrust [status|logs]',
+      execute: this.manageRustML.bind(this),
     }
   ];
 
@@ -808,31 +808,20 @@ ${channelList}
             `📊 **Training Data:** ${stats.totalMessages} messages\n` +
             `⚡ **Method:** Local CPU training\n\n` +
             `💡 Use \`!llmtrain status\` to monitor progress.`
+        } else {
+          await message.reply(
+            '❌ **Training Failed to Start**\n\n' +
+            `Error: ${result.error || 'Unknown error occurred'}\n\n` +
+            `💡 Check that the Rust ML module is properly compiled.`
           );
-          messageCount: stats.totalMessages
-        }));
-
-        await message.reply(
-          '🚀 **Force Training Signal Sent!**\n\n' +
-          `📊 **Training Data:**\n` +
-          `• Total messages: ${stats.totalMessages}\n` +
-          `• Current model version: v${stats.modelVersion}\n\n` +
-          `⚡ **Next Steps:**\n` +
-          `• Remote Windows clients will detect this signal on their next check\n` +
-          `• Training will start immediately regardless of thresholds\n` +
-          `• Check \`!llmremote logs\` for training progress\n\n` +
-          `💡 **Note:** Force training bypasses:\n` +
-          `• Minimum message requirements (${remoteConfig.minMessagesThreshold})\n` +
-          `• Training interval limits (${remoteConfig.trainingIntervalHours}h)\n` +
-          `• Active training checks`
-        );
+        }
 
       } catch (error) {
-        await message.reply('❌ Failed to create force training signal. Check bot logs for details.');
-        console.error('Failed to create force training flag:', error);
+        await message.reply('❌ Failed to start Rust ML training. Check bot logs for details.');
+        console.error('Failed to start Rust ML training:', error);
       }
     } else {
-      await message.reply('❌ Unknown command. Use `!llmtrain status` for training information.\n\n💡 Available commands:\n• `!llmtrain status` - Show training status\n• `!llmtrain force` - Force immediate training\n\n🌐 Remote training is handled by Windows clients. Use `!llmremote` commands for remote training management.');
+      await message.reply('❌ Unknown command. Use `!llmtrain status` for training information.\n\n💡 Available commands:\n• `!llmtrain status` - Show training status\n• `!llmtrain now` - Start training\n• `!llmtrain force` - Force immediate training\n\n🦀 Training is handled by local Rust ML.');
     }
   }
 
