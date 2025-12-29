@@ -74,12 +74,16 @@ RUN echo "🦀 Building Rust ML module with Neon..." && \
     ls -la target/release/ && \
     find . -name "*.node" -o -name "*krokenheimer*.so" -o -name "*krokenheimer*.dll" -o -name "*krokenheimer*.dylib" && \
     echo "🔗 Copying native module to expected location..." && \
-    (find target/release -name "*.node" -exec cp {} ./index.node \; || \
-     find target/release -name "*krokenheimer*.so" -exec cp {} ./index.node \; || \
-     find target/release -name "*krokenheimer*.dll" -exec cp {} ./index.node \; || \
-     find target/release -name "*krokenheimer*.dylib" -exec cp {} ./index.node \; || \
-     echo "⚠️  No native module found - will run in fallback mode") && \
-    (ls -la index.node 2>/dev/null && echo "✅ Native module ready at ./index.node" || echo "⚠️  index.node not found - running in fallback mode")
+    # Find and copy the native module to the expected location
+    NATIVE_MODULE=$(find target/release -name "*.node" -o -name "*krokenheimer*.so" -o -name "*krokenheimer*.dll" -o -name "*krokenheimer*.dylib" | head -1) && \
+    if [ -n "$NATIVE_MODULE" ]; then \
+        cp "$NATIVE_MODULE" ./index.node && \
+        echo "✅ Native module copied: $NATIVE_MODULE -> ./index.node" && \
+        ls -la index.node; \
+    else \
+        echo "⚠️  No native module found - will run in fallback mode" && \
+        find target/release -type f -name "*krokenheimer*"; \
+    fi
 
 # Now copy the rest of the source code (TypeScript, etc.)
 WORKDIR /app
