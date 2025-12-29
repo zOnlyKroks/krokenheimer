@@ -356,7 +356,7 @@ impl BPETokenizer {
 
         for &token_id in token_ids {
             if let Some(token) = self.id_to_token.get(&token_id) {
-                tokens.push(token);
+                tokens.push(token.as_str());  // Convert &String to &str
             }
         }
 
