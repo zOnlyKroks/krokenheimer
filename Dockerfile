@@ -134,11 +134,17 @@ if os.path.exists(tokenizer_file):\n\
             data[\"decoder\"] = {\"type\": \"ByteLevel\"}\n\
             fixed = True\n\
     \n\
-    # Fix pre_tokenizer - ensure add_prefix_space exists\n\
+    # Fix pre_tokenizer - ensure all ByteLevel fields exist\n\
     if \"pre_tokenizer\" in data and isinstance(data[\"pre_tokenizer\"], dict):\n\
         if data[\"pre_tokenizer\"].get(\"type\") == \"ByteLevel\":\n\
             if \"add_prefix_space\" not in data[\"pre_tokenizer\"]:\n\
                 data[\"pre_tokenizer\"][\"add_prefix_space\"] = False\n\
+                fixed = True\n\
+            if \"trim_offsets\" not in data[\"pre_tokenizer\"]:\n\
+                data[\"pre_tokenizer\"][\"trim_offsets\"] = True\n\
+                fixed = True\n\
+            if \"use_regex\" not in data[\"pre_tokenizer\"]:\n\
+                data[\"pre_tokenizer\"][\"use_regex\"] = True\n\
                 fixed = True\n\
     \n\
     # Fix post_processor if it exists\n\
@@ -147,14 +153,28 @@ if os.path.exists(tokenizer_file):\n\
             if \"add_prefix_space\" not in data[\"post_processor\"]:\n\
                 data[\"post_processor\"][\"add_prefix_space\"] = False\n\
                 fixed = True\n\
+            if \"trim_offsets\" not in data[\"post_processor\"]:\n\
+                data[\"post_processor\"][\"trim_offsets\"] = True\n\
+                fixed = True\n\
+            if \"use_regex\" not in data[\"post_processor\"]:\n\
+                data[\"post_processor\"][\"use_regex\"] = True\n\
+                fixed = True\n\
     \n\
-    # Recursively fix any nested objects that might need add_prefix_space\n\
+    # Recursively fix any nested objects that might need ByteLevel fields\n\
     def fix_nested(obj):\n\
         global fixed\n\
         if isinstance(obj, dict):\n\
-            if obj.get(\"type\") == \"ByteLevel\" and \"add_prefix_space\" not in obj:\n\
-                obj[\"add_prefix_space\"] = False\n\
-                fixed = True\n\
+            if obj.get(\"type\") == \"ByteLevel\":\n\
+                # Add all required ByteLevel fields\n\
+                if \"add_prefix_space\" not in obj:\n\
+                    obj[\"add_prefix_space\"] = False\n\
+                    fixed = True\n\
+                if \"trim_offsets\" not in obj:\n\
+                    obj[\"trim_offsets\"] = True\n\
+                    fixed = True\n\
+                if \"use_regex\" not in obj:\n\
+                    obj[\"use_regex\"] = True\n\
+                    fixed = True\n\
             for v in obj.values():\n\
                 fix_nested(v)\n\
         elif isinstance(obj, list):\n\
