@@ -26,7 +26,7 @@ export class RustMLService {
   async initialize(): Promise<boolean> {
     try {
       // Try to load the Rust module
-      const rustModulePath = path.resolve('./rust-ml/index.node');
+      const rustModulePath = path.resolve('./rust-ml');
 
       // Check if compiled Rust module exists
       try {
@@ -320,7 +320,7 @@ export class RustMLService {
       }
     } else {
       console.log('[RustML] ❌ Training requested but Rust module not available');
-      console.log('[RustML] 🔍 Expected module location: ./rust-ml/index.node');
+      console.log('[RustML] 🔍 Expected module location: ./rust-ml');
       console.log('[RustML] 💡 To fix: 1) cd rust-ml && npm run build, 2) verify index.node exists, 3) restart bot');
     }
 

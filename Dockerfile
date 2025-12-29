@@ -73,7 +73,11 @@ WORKDIR /app/rust-ml
 RUN echo "🦀 Building Rust ML module..." && \
     npm run build && \
     echo "✅ Rust build completed" && \
-    find . -name "*.node" -o -path "*target/release*" -name "*krokenheimer*"
+    find . -name "*.node" -o -path "*target/release*" -name "*krokenheimer*" && \
+    echo "🔍 Verifying .node file accessibility:" && \
+    ls -la *.node && \
+    chmod +r *.node && \
+    echo "✅ File permissions fixed"
 
 # ------------------------------------------------------------
 # App source
