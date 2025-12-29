@@ -209,8 +209,8 @@ impl InferenceService {
 
             // Apply temperature
             let scaled_logits = if temperature > 0.0 {
-                let temp_tensor = Tensor::new(&[temperature], next_token_logits.device())?;
-                (&next_token_logits / &temp_tensor)?
+                let temp_tensor = Tensor::from_slice(&[temperature], &[], next_token_logits.device())?;
+                next_token_logits.broadcast_div(&temp_tensor)?
             } else {
                 next_token_logits
             };
