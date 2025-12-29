@@ -107,6 +107,35 @@ RUN mkdir -p \
     /app/data/checkpoints \
     /var/log/supervisor
 
+# Fix tokenizer format if it exists (adds missing add_prefix_space fields)
+RUN echo '#!/bin/bash\n\
+TOKENIZER_FILE="/app/data/models/krokenheimer/tokenizer.json"\n\
+if [ -f "$TOKENIZER_FILE" ]; then\n\
+  echo "🔧 Fixing tokenizer format..."\n\
+  python3 -c "\n\
+import json, os\n\
+tokenizer_file = \"$TOKENIZER_FILE\"\n\
+if os.path.exists(tokenizer_file):\n\
+    with open(tokenizer_file, \"r\") as f:\n\
+        data = json.load(f)\n\
+    # Fix added_tokens\n\
+    if \"added_tokens\" in data:\n\
+        for token in data[\"added_tokens\"]:\n\
+            if \"add_prefix_space\" not in token:\n\
+                token[\"add_prefix_space\"] = False\n\
+    # Fix decoder\n\
+    if \"decoder\" in data and data[\"decoder\"].get(\"type\") == \"ByteLevel\":\n\
+        data[\"decoder\"] = {\"type\": \"ByteLevel\"}\n\
+    # Fix pre_tokenizer\n\
+    if \"pre_tokenizer\" in data and data[\"pre_tokenizer\"].get(\"type\") == \"ByteLevel\":\n\
+        if \"add_prefix_space\" not in data[\"pre_tokenizer\"]:\n\
+            data[\"pre_tokenizer\"][\"add_prefix_space\"] = False\n\
+    with open(tokenizer_file, \"w\") as f:\n\
+        json.dump(data, f, indent=2)\n\
+    print(\"✅ Tokenizer format fixed!\")\n\
+"\n\
+fi' > /usr/local/bin/fix-tokenizer.sh && chmod +x /usr/local/bin/fix-tokenizer.sh
+
 RUN chmod +x /app/wait-for-chromadb.sh && \
     cp /app/wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh && \
     cp /app/docker-supervisord.conf /etc/supervisor/supervisord.conf
@@ -130,4 +159,14 @@ EOF
 # Runtime
 # ------------------------------------------------------------
 EXPOSE 8000
-CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]
+
+# Create startup script that fixes tokenizer before starting services
+RUN echo '#!/bin/bash\n\
+echo "🚀 Starting Krokenheimer..."\n\
+# Fix tokenizer if it exists\n\
+/usr/local/bin/fix-tokenizer.sh\n\
+# Start supervisord\n\
+exec /usr/bin/supervisord -n -c /etc/supervisor/supervisord.conf' > /usr/local/bin/start.sh && \
+    chmod +x /usr/local/bin/start.sh
+
+CMD ["/usr/local/bin/start.sh"]
