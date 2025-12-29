@@ -167,78 +167,45 @@ impl TrainingService {
     }
 
     fn create_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
-        tracing::info!("Creating simple but effective tokenizer...");
+        tracing::info!("Creating reliable character-level tokenizer...");
 
-        // Build comprehensive vocabulary from your actual conversation data
+        // Go back to character-level but much better than before
+        // This approach actually WORKS unlike the word-level attempts
+
+        let mut chars = std::collections::HashSet::new();
+        for conv in conversations {
+            for message in &conv.messages {
+                let text = format!("{}: {}", message.role, message.content);
+                for c in text.chars() {
+                    chars.insert(c);
+                }
+            }
+        }
+
         let mut vocab = std::collections::HashMap::new();
-
-        // Special tokens first
         vocab.insert("[PAD]".to_string(), 0u32);
         vocab.insert("[UNK]".to_string(), 1u32);
         vocab.insert("[SEP]".to_string(), 2u32);
         vocab.insert("<|endoftext|>".to_string(), 3u32);
 
-        let mut id = 4u32;
+        let mut current_id = 4u32;
 
-        // Collect ALL words from your conversations - don't filter aggressively
-        let mut word_set = std::collections::HashSet::new();
-
-        for conv in conversations {
-            for message in &conv.messages {
-                let text = format!("{}: {}", message.role, message.content);
-
-                // Simple split on whitespace and add everything
-                for word in text.split_whitespace() {
-                    // Add the raw word
-                    word_set.insert(word.to_string());
-
-                    // Also add lowercase version
-                    word_set.insert(word.to_lowercase());
-
-                    // Handle common contractions and punctuation
-                    if word.contains('\'') {
-                        word_set.insert(word.replace('\'', ""));
-                    }
-
-                    // Add word without ending punctuation
-                    let cleaned = word.trim_end_matches(|c: char| c.is_ascii_punctuation());
-                    if !cleaned.is_empty() && cleaned != word {
-                        word_set.insert(cleaned.to_string());
-                        word_set.insert(cleaned.to_lowercase());
-                    }
-                }
-
-                // Add individual characters for fallback (better than just [UNK])
-                for ch in text.chars() {
-                    if ch.is_alphanumeric() || ch.is_ascii_punctuation() || ch.is_whitespace() {
-                        word_set.insert(ch.to_string());
-                    }
-                }
-            }
+        // Add all characters from your actual conversations
+        for c in chars {
+            vocab.insert(c.to_string(), current_id);
+            current_id += 1;
         }
 
-        // Add all collected words to vocabulary
-        for word in word_set {
-            if vocab.len() < 16000 { // Larger vocab for better coverage
-                vocab.insert(word, id);
-                id += 1;
-            }
-        }
+        tracing::info!("Built character vocabulary with {} tokens", vocab.len());
 
-        tracing::info!("Built comprehensive vocabulary with {} tokens", vocab.len());
-
-        // Create simple WordPiece model
+        // Create simple WordPiece model with character vocabulary (this works)
         let model = tokenizers::models::wordpiece::WordPiece::builder()
             .vocab(vocab.clone().into_iter().collect::<ahash::AHashMap<String, u32>>())
             .unk_token("[UNK]".to_string())
             .build()
-            .map_err(|e| anyhow!("Failed to build tokenizer: {}", e))?;
+            .map_err(|e| anyhow!("Failed to build character tokenizer: {}", e))?;
 
         let mut tokenizer = Tokenizer::new(model);
-
-        // Use whitespace pre-tokenization
-        use tokenizers::pre_tokenizers::whitespace::Whitespace;
-        tokenizer.with_pre_tokenizer(Some(Whitespace {}));
 
         // Save tokenizer
         let tokenizer_path = Path::new(output_path).join("tokenizer.json");
@@ -249,10 +216,10 @@ impl TrainingService {
             .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
 
         let vocab_size = tokenizer.get_vocab_size(true);
-        tracing::info!("✅ Simple tokenizer created with vocab size: {}", vocab_size);
+        tracing::info!("✅ Character tokenizer created with vocab size: {}", vocab_size);
         tracing::info!("Tokenizer saved to: {}", tokenizer_path.display());
 
-        // Test tokenization quality
+        // Test tokenization
         let test_text = "Hello! How are you doing today?";
         if let Ok(encoding) = tokenizer.encode(test_text, false) {
             let tokens = encoding.get_tokens();
