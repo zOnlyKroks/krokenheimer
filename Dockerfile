@@ -69,7 +69,7 @@ WORKDIR /app/rust-ml
 
 RUN echo "🦀 Building Rust ML module with Neon..." && \
     npm install && \
-    npx @neon-rs/cli build --release && \
+    npx neon build --release && \
     echo "✅ Neon build completed" && \
     echo "🔍 Verifying native module:" && \
     find . -name "index.node"
