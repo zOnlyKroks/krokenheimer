@@ -50,8 +50,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
-# Copy source code
-COPY . .
+# Copy ONLY Rust module files first (for better caching)
+COPY rust-ml/ ./rust-ml/
 
 # Build Rust ML module FIRST (before TypeScript)
 WORKDIR /app/rust-ml
@@ -59,6 +59,12 @@ RUN echo "🦀 Building Rust ML module..." && \
     cargo build --release && \
     echo "✅ Rust ML module compiled successfully" && \
     ls -la target/release/ | grep -E "\.(so|dylib|dll)$" || echo "⚠️  No shared library found"
+
+# Now copy the rest of the source code (TypeScript, etc.)
+WORKDIR /app
+COPY src/ ./src/
+COPY *.json *.js *.ts *.md ./
+COPY docker-supervisord.conf wait-for-chromadb.sh ./
 
 # Build TypeScript
 WORKDIR /app
@@ -74,10 +80,10 @@ RUN npm prune --production
 # Create necessary directories
 RUN mkdir -p /app/data /app/chroma_data /app/data/models /app/data/checkpoints /var/log/supervisor
 
-# Copy configuration files
-COPY wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh
-RUN chmod +x /usr/local/bin/wait-for-chromadb.sh
-COPY docker-supervisord.conf /etc/supervisor/supervisord.conf
+# Make scripts executable and copy to final locations
+RUN chmod +x /app/wait-for-chromadb.sh && \
+    cp /app/wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh && \
+    cp /app/docker-supervisord.conf /etc/supervisor/supervisord.conf
 
 # Verify Rust ML module integration
 RUN echo "🧪 Testing Rust ML module..." && \
