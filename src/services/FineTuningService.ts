@@ -74,7 +74,6 @@ export class FineTuningService {
    * Check if training should be recommended (for remote clients)
    */
   shouldRecommendTraining(): boolean {
-    // No automatic threshold - let remote clients decide based on their configuration
     return this.messagesSinceLastTrain > 0;
   }
 

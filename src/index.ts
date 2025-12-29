@@ -8,7 +8,6 @@ import { CalculatorPlugin } from "./plugins/CalculatorPlugin.js";
 import { ASCIIArtPlugin } from "./plugins/ASCIIArtPlugin.js";
 import { DownCheckerPlugin } from "./plugins/DownCheckerPlugin.js";
 import { LLMPlugin } from "./plugins/LLMPlugin.js";
-import { RemoteTrainingApiService } from "./services/RemoteTrainingApiService.js";
 import messageStorageService from "./services/MessageStorageService.js";
 import fineTuningService from "./services/FineTuningService.js";
 import type { BotConfig } from "./types/index.ts";
@@ -42,12 +41,6 @@ async function main() {
 
   const bot = new ExtensibleBot(config);
 
-  // Initialize Remote Training API Service
-  const remoteApiService = new RemoteTrainingApiService(
-    messageStorageService,
-    fineTuningService
-  );
-
   try {
     await bot.loadPlugin(new CorePlugin());
     await bot.loadPlugin(new GifPlugin());
@@ -59,36 +52,7 @@ async function main() {
 
     await bot.start();
 
-    // Start Remote Training API if enabled
-    const enableRemoteApi = process.env.REMOTE_API_ENABLED !== 'false';
-    if (enableRemoteApi) {
-      try {
-        await remoteApiService.start();
-        console.log("🌐 Remote Training API started successfully!");
-      } catch (error) {
-        console.error("❌ Failed to start Remote Training API:", error);
-        console.log("ℹ️ Bot will continue running without remote API");
-      }
-    } else {
-      console.log("🔌 Remote Training API disabled via REMOTE_API_ENABLED=false");
-    }
-
     console.log("🚀 Bot started successfully!");
-
-    // Graceful shutdown
-    process.on('SIGINT', async () => {
-      console.log('\n🛑 Shutting down gracefully...');
-      try {
-        if (remoteApiService.isRunning()) {
-          await remoteApiService.stop();
-        }
-        process.exit(0);
-      } catch (error) {
-        console.error('Error during shutdown:', error);
-        process.exit(1);
-      }
-    });
-
   } catch (error) {
     console.error("Failed to start bot:", error);
     process.exit(1);
