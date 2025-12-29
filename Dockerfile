@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------
-# Rust toolchain
+# Rust toolchain (INSTALL ONCE)
 # ------------------------------------------------------------
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
@@ -34,6 +34,9 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --default-toolchain stable && \
     chmod -R a+w $RUSTUP_HOME $CARGO_HOME
+
+# 🔑 Make cargo globally visible (fixes ENOENT)
+RUN ln -s /usr/local/cargo/bin/cargo /usr/bin/cargo
 
 RUN rustc --version && cargo --version
 
@@ -62,7 +65,7 @@ COPY package*.json ./
 RUN npm install
 
 # ------------------------------------------------------------
-# Rust ML module (Neon)
+# Rust ML module (Neon build happens HERE)
 # ------------------------------------------------------------
 COPY rust-ml/ ./rust-ml/
 WORKDIR /app/rust-ml
@@ -71,7 +74,6 @@ RUN echo "🦀 Building Rust ML module with Neon..." && \
     npm install && \
     npx neon-cli build --release && \
     echo "✅ Neon build completed" && \
-    echo "🔍 Verifying native module:" && \
     find . -path "*native/index.node"
 
 # ------------------------------------------------------------
@@ -85,10 +87,7 @@ COPY docker-supervisord.conf wait-for-chromadb.sh ./
 # ------------------------------------------------------------
 # Build TypeScript
 # ------------------------------------------------------------
-RUN echo "🔨 Building TypeScript..." && \
-    npm run build && \
-    echo "📦 Build complete" && \
-    test -f /app/dist/index.js
+RUN npm run build && test -f /app/dist/index.js
 
 # ------------------------------------------------------------
 # Production cleanup
@@ -112,8 +111,7 @@ RUN chmod +x /app/wait-for-chromadb.sh && \
 # ------------------------------------------------------------
 # Final verification
 # ------------------------------------------------------------
-RUN echo "🧪 Testing Rust ML module..." && \
-    node - <<'EOF'
+RUN node - <<'EOF'
 try {
   const rustML = require('./rust-ml');
   console.log('✅ Rust ML module loaded');
