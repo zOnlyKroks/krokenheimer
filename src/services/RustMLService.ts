@@ -44,14 +44,24 @@ export class RustMLService {
         this.rustModule = require(rustModulePath);
         console.log('[RustML] ✅ Module loaded successfully, attempting model load...');
 
-        // Try to load the model
-        const modelLoaded = this.rustModule.loadModel(this.modelPath);
-        if (modelLoaded) {
-          this.isInitialized = true;
-          console.log('[RustML] Successfully initialized with Rust module');
-          return true;
+        // Check if model files exist before attempting to load
+        const modelExists = await this.checkModelExists();
+        if (!modelExists) {
+          console.log('[RustML] ⚠️ Model files not found at:', this.modelPath);
+          console.log('[RustML] 💡 This is normal on first startup or server without trained model');
+          console.log('[RustML] 🤖 Bot will work in fallback mode until training is completed');
+          // Don't try to load the model, just continue to fallback mode
         } else {
-          console.log('[RustML] ⚠️ Module loaded but model failed to load from:', this.modelPath);
+          // Try to load the model
+          const modelLoaded = this.rustModule.loadModel(this.modelPath);
+          if (modelLoaded) {
+            this.isInitialized = true;
+            console.log('[RustML] Successfully initialized with Rust module');
+            return true;
+          } else {
+            console.log('[RustML] ⚠️ Model files exist but failed to load from:', this.modelPath);
+            console.log('[RustML] 💡 This might be due to corrupted or incompatible model files');
+          }
         }
       } catch (error) {
         console.log('[RustML] ❌ Rust module not available, using fallback mode');
