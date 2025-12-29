@@ -218,8 +218,10 @@ impl TrainingService {
         tracing::info!("Character vocabulary size: {}", vocab.len());
 
         // Use the most basic tokenizer model
+        use ahash::AHashMap;
+
         let model = tokenizers::models::wordpiece::WordPiece::builder()
-            .vocab(vocab.clone().into_iter().collect())
+            .vocab(vocab.clone().into_iter().collect::<AHashMap<String, u32>>())
             .unk_token("[UNK]".to_string())
             .build()
             .map_err(|e| anyhow!("Failed to build tokenizer: {}", e))?;
