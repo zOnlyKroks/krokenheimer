@@ -4,6 +4,7 @@ use tokenizers::Tokenizer;
 use anyhow::{Result, Context, anyhow};
 use std::path::Path;
 use serde_json;
+use rand::Rng;
 use crate::model::Gpt2Config;
 
 // Simple transformer model implementation since candle_transformers::gpt2 is not available
@@ -99,7 +100,7 @@ impl MultiHeadAttention {
         let qkv = self.c_attn.forward(x)?;
         // In real attention: split QKV, do attention computation
         // For simplification: just take the first n_embd dimensions (Q part)
-        let (_batch_size, seq_len, _full_dim) = qkv.dims3()?;
+        let (_batch_size, _seq_len, _full_dim) = qkv.dims3()?;
         let q_only = qkv.narrow(2, 0, self.n_embd)?; // Take first n_embd dimensions
         self.c_proj.forward(&q_only)
     }
@@ -268,8 +269,8 @@ impl InferenceService {
         let probabilities_1d = probabilities.squeeze(0)?;
         let probs_vec = probabilities_1d.to_vec1::<f32>()?;
 
-        let mut rng = rand::thread_rng();
-        let random_value: f32 = rand::Rng::gen(&mut rng);
+        let mut rng = rand::rng();
+        let random_value: f32 = rng.random();
 
         let mut cumulative = 0.0;
         for (i, prob) in probs_vec.iter().enumerate() {

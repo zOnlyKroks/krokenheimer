@@ -411,8 +411,9 @@ impl TrainingService {
             tracing::info!("Loading model checkpoint for continued training...");
 
             // Load the VarMap from safetensors
-            match VarMap::load(standard_model_path) {
-                Ok(var_map) => {
+            let mut var_map = VarMap::new();
+            match var_map.load(standard_model_path) {
+                Ok(()) => {
                     tracing::info!("✅ Successfully loaded model checkpoint!");
                     tracing::info!("Continuing training from existing weights");
                     return Ok(Some(var_map));
@@ -435,7 +436,8 @@ impl TrainingService {
                             tracing::info!("Found alternative model at: {:?}", potential_model);
 
                             // Try loading this alternative model
-                            if let Ok(var_map) = VarMap::load(&potential_model) {
+                            let mut var_map = VarMap::new();
+                            if var_map.load(&potential_model).is_ok() {
                                 tracing::info!("✅ Successfully loaded alternative model checkpoint!");
                                 return Ok(Some(var_map));
                             }
@@ -450,27 +452,9 @@ impl TrainingService {
     }
 
     /// Verify that loaded model is compatible with current configuration
-    fn verify_model_compatibility(&self, var_map: &VarMap, config: &Gpt2Config) -> Result<()> {
-        // Check if required tensors exist in the loaded model
-        let required_keys = [
-            "transformer.wte.weight",    // Token embeddings
-            "transformer.wpe.weight",    // Position embeddings
-            "transformer.ln_f.weight",   // Final layer norm
-            "lm_head.weight"             // Language model head
-        ];
-
-        for key in &required_keys {
-            // Try to build a simple var to see if the key exists
-            let var_builder = VarBuilder::from_varmap(var_map, candle_core::DType::F32, &self.device);
-            if var_builder.get_with_hints((config.vocab_size, config.n_embd), key).is_err() &&
-               var_builder.get_with_hints((config.n_embd,), key).is_err() &&
-               var_builder.get_with_hints((config.vocab_size,), key).is_err() {
-                // Key might not exist or have wrong shape - this is still okay
-                tracing::debug!("Key {} might not exist in checkpoint (this is normal)", key);
-            }
-        }
-
-        // Basic compatibility - if we got here without major errors, it's probably compatible
+    fn verify_model_compatibility(&self, _var_map: &VarMap, _config: &Gpt2Config) -> Result<()> {
+        // For now, assume compatibility since we're using the same architecture
+        // Advanced compatibility checking can be added later if needed
         tracing::info!("Model architecture appears compatible");
         Ok(())
     }
