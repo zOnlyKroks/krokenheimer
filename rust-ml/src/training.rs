@@ -67,7 +67,7 @@ impl TrainingService {
         let tokenized_data = self.tokenize_conversations_batch(&conversations, &tokenizer)?;
 
         // Split data
-        let validation_split = 0.1; // Reduced from 0.2 to use more training data
+        let validation_split = 0.15; // Increased for better validation accuracy
         let split_index = ((tokenized_data.len() as f32) * (1.0 - validation_split)) as usize;
         let (train_data, val_data) = tokenized_data.split_at(split_index);
 
@@ -233,14 +233,14 @@ impl TrainingService {
     }
 
     fn create_optimized_config(&self, vocab_size: usize) -> Gpt2Config {
-        // SMALLER MODEL FOR FASTER TRAINING
+        // IMPROVED MODEL FOR BETTER QUALITY (moderately larger)
         Gpt2Config {
             vocab_size,
-            n_positions: 512,    // Reduced from 2048 - shorter sequences are much faster
-            n_embd: 256,         // Reduced from 768 - smaller embeddings = less computation
-            n_layer: 6,          // Reduced from 12 - fewer layers
-            n_head: 8,           // Reduced from 12 - fewer attention heads
-            n_inner: Some(512),  // Reduced from 3072 - much smaller feedforward
+            n_positions: 512,    // Keep reasonable sequence length
+            n_embd: 384,         // Increased from 256 for better representation
+            n_layer: 8,          // Increased from 6 for more depth
+            n_head: 12,          // Increased from 8 for better attention
+            n_inner: Some(1024), // Increased from 512 for better feedforward
             activation_function: Activation::Gelu,
             resid_pdrop: 0.1,
             embd_pdrop: 0.1,
@@ -265,23 +265,23 @@ impl TrainingService {
         is_continuing: bool,
         output_path: &str,
     ) -> Result<()> {
-        tracing::info!("Starting optimized model training...");
+        tracing::info!("Starting high-quality model training...");
 
-        // OPTIMIZED HYPERPARAMETERS
-        let batch_size = 32;  // Increased batch size (but smaller model allows this)
-        let max_sequence_length = config.n_positions.min(256); // Use shorter sequences
+        // HIGH-QUALITY HYPERPARAMETERS (slower but better)
+        let batch_size = 16;  // Smaller batches for more frequent updates
+        let max_sequence_length = config.n_positions.min(384); // Longer sequences for better context
 
         // Calculate total batches
         let total_batches = (train_data.len() + batch_size - 1) / batch_size;
 
-        tracing::info!("Optimized training config: batch_size={}, seq_len={}, total_batches={}",
+        tracing::info!("High-quality training config: batch_size={}, seq_len={}, total_batches={}",
                       batch_size, max_sequence_length, total_batches);
 
-        // Create optimizer with warmup
+        // Create optimizer with lower learning rate for stability
         let mut optimizer = AdamW::new(
             var_map.all_vars(),
             ParamsAdamW {
-                lr: if is_continuing { 1e-5 } else { 3e-4 }, // Higher LR for fresh training
+                lr: if is_continuing { 5e-6 } else { 1e-4 }, // Lower LR for more stable training
                 beta1: 0.9,
                 beta2: 0.999,
                 eps: 1e-8,
@@ -289,10 +289,10 @@ impl TrainingService {
             }
         )?;
 
-        // Early stopping
+        // Early stopping with more patience
         let mut best_val_loss = f32::INFINITY;
         let mut patience_counter = 0;
-        let patience = 2; // Reduced patience
+        let patience = 4; // More patience for better convergence
 
         for epoch in 1..=epochs {
             tracing::info!("Epoch {}/{} - Processing {} batches", epoch, epochs, total_batches);
@@ -334,11 +334,34 @@ impl TrainingService {
                 total_loss += loss_value;
                 processed_batches += 1;
 
-                // Backward pass
+                // Backward pass with gradient clipping for stability
                 let grads = loss.backward()?;
-                optimizer.step(&grads)?;
 
-                // Log progress every 5% of batches
+                // Simple gradient clipping by scaling if norm is too large
+                let mut clipped_grads = std::collections::HashMap::new();
+                let max_grad_norm = 1.0;
+                let mut total_norm_sq = 0.0;
+
+                for (name, grad) in &grads {
+                    if let Ok(grad_norm) = grad.sqr()?.sum_all()?.to_scalar::<f32>() {
+                        total_norm_sq += grad_norm;
+                    }
+                    clipped_grads.insert(name.clone(), grad.clone());
+                }
+
+                let total_norm = total_norm_sq.sqrt();
+                if total_norm > max_grad_norm {
+                    let clip_coeff = max_grad_norm / total_norm;
+                    for (name, grad) in &mut clipped_grads {
+                        if let Ok(clipped) = grad.mul(clip_coeff as f64) {
+                            *grad = clipped;
+                        }
+                    }
+                }
+
+                optimizer.step(&clipped_grads)?;
+
+                // Log progress every 5% of batches (more frequent for monitoring)
                 if processed_batches % (total_batches.max(1) / 20).max(1) == 0 {
                     let elapsed = epoch_start.elapsed();
                     let batches_per_sec = processed_batches as f64 / elapsed.as_secs_f64();
@@ -454,8 +477,8 @@ impl TrainingService {
         let mut total_loss = 0.0;
         let mut batch_count = 0;
 
-        // Use smaller batch for validation if needed
-        let val_batch_size = batch_size.min(8);
+        // Use smaller batch for more thorough validation
+        let val_batch_size = batch_size.min(4);
 
         for chunk in val_data.chunks(val_batch_size) {
             let batch_refs: Vec<&Vec<u32>> = chunk.iter().collect();
