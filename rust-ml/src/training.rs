@@ -135,52 +135,29 @@ impl TrainingService {
         Ok(conversations)
     }
 
-    /// Apply data quality filters to improve training data
+    /// Apply minimal data quality filters - keep your good conversation data!
     fn apply_data_quality_filters(&self, conv: ConversationData) -> Option<ConversationData> {
-        // Filter out conversations with too few messages (need context)
-        if conv.messages.len() < 3 {
+        // Much more relaxed filtering - keep real conversations
+        if conv.messages.is_empty() {
             return None;
         }
 
         let mut filtered_messages = Vec::new();
 
         for message in conv.messages {
-            // Skip messages that are too short or contain only spam/noise
             let trimmed_content = message.content.trim();
 
-            // Filter out very short messages (less than 3 characters)
-            if trimmed_content.len() < 3 {
+            // Only filter out completely empty messages
+            if trimmed_content.is_empty() {
                 continue;
             }
 
-            // Filter out messages with only emoji or special characters
-            let alphanumeric_count = trimmed_content.chars().filter(|c| c.is_alphanumeric()).count();
-            if alphanumeric_count < 2 {
-                continue;
-            }
-
-            // Filter out messages that are just URLs or mostly URLs
-            let url_ratio = trimmed_content.matches("http").count() as f32 / trimmed_content.split_whitespace().count().max(1) as f32;
-            if url_ratio > 0.5 {
-                continue;
-            }
-
-            // Filter out excessive repetition (same character repeated more than 5 times)
-            let has_excessive_repetition = trimmed_content.chars()
-                .collect::<Vec<_>>()
-                .windows(6)
-                .any(|window| window.iter().all(|&c| c == window[0]));
-
-            if has_excessive_repetition {
-                continue;
-            }
-
-            // Keep the message if it passed all filters
+            // Keep everything else - your conversations are good data!
             filtered_messages.push(message);
         }
 
-        // Only keep conversations with at least 2 quality messages
-        if filtered_messages.len() >= 2 {
+        // Keep any conversation with at least 1 message
+        if !filtered_messages.is_empty() {
             Some(ConversationData {
                 messages: filtered_messages,
             })
