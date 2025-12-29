@@ -314,18 +314,18 @@ impl TrainingService {
     }
 
     fn create_optimized_config(&self, vocab_size: usize) -> Gpt2Config {
-        // Optimized model config for better quality
+        // Optimized model config for better coherence
         Gpt2Config {
             vocab_size,
-            n_positions: 512,
-            n_embd: 384,
-            n_layer: 8,
-            n_head: 12,
-            n_inner: Some(1024),
+            n_positions: 1024,      // Longer context for better coherence
+            n_embd: 512,            // Larger embeddings for better representations
+            n_layer: 10,            // More layers for deeper understanding
+            n_head: 16,             // More attention heads
+            n_inner: Some(1536),    // Larger MLP hidden size
             activation_function: Activation::Gelu,
-            resid_pdrop: 0.1,
-            embd_pdrop: 0.1,
-            attn_pdrop: 0.1,
+            resid_pdrop: 0.05,      // Reduced dropout for more stability
+            embd_pdrop: 0.05,       // Reduced dropout for more stability
+            attn_pdrop: 0.05,       // Reduced dropout for more stability
             layer_norm_epsilon: 1e-5,
             initializer_range: 0.02,
             scale_attn_weights: true,
@@ -348,9 +348,9 @@ impl TrainingService {
     ) -> Result<()> {
         tracing::info!("Starting model training...");
 
-        // Optimized hyperparameters
-        let batch_size = 8;  // Smaller batches for better gradient estimates
-        let max_sequence_length = config.n_positions.min(384);
+        // Optimized hyperparameters for coherence
+        let batch_size = 4;  // Smaller batches for more stable gradients with larger model
+        let max_sequence_length = config.n_positions.min(512);  // Use more context
 
         // Calculate total batches
         let total_batches = (train_data.len() + batch_size - 1) / batch_size;
@@ -358,22 +358,22 @@ impl TrainingService {
         tracing::info!("Training config: batch_size={}, seq_len={}, total_batches={}",
                       batch_size, max_sequence_length, total_batches);
 
-        // Create optimizer
+        // Create optimizer with conservative learning rate for coherence
         let mut optimizer = AdamW::new(
             var_map.all_vars(),
             ParamsAdamW {
-                lr: if is_continuing { 5e-6 } else { 1e-4 },
+                lr: if is_continuing { 2e-6 } else { 5e-5 },  // Lower learning rate for stability
                 beta1: 0.9,
                 beta2: 0.999,
                 eps: 1e-8,
-                weight_decay: 0.01,
+                weight_decay: 0.05,  // Higher weight decay to prevent overfitting
             }
         )?;
 
-        // Early stopping
+        // Early stopping with more patience for larger model
         let mut best_val_loss = f32::INFINITY;
         let mut patience_counter = 0;
-        let patience = 4;
+        let patience = 6;  // More patience for coherence to develop
 
         for epoch in 1..=epochs {
             tracing::info!("Epoch {}/{} - Processing {} batches", epoch, epochs, total_batches);

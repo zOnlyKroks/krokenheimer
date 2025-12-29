@@ -136,8 +136,8 @@ export class RustMLService {
       // Build context for Rust module
       const prompt = this.buildContextPrompt(context, channelName);
 
-      // Generate using Rust module
-      const result = this.rustModule.generateText(prompt, 100, 0.9);
+      // Generate using Rust module with coherence-focused temperature
+      const result = this.rustModule.generateText(prompt, 100, 0.3);
 
       if (result && result.length > 0) {
         return result;
