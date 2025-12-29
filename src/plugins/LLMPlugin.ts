@@ -48,6 +48,11 @@ export class LLMPlugin implements BotPlugin {
       description: 'Clear vector store (use after switching embedding methods)',
       execute: this.clearVectorStore.bind(this),
     },
+      {
+          name: 'llmstore',
+          description: 'Store collected data into vector store',
+          execute: this.embedVectorStore.bind(this),
+      },
     {
       name: 'llmexclude',
       description: 'Manage channels excluded from training',
