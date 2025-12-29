@@ -142,15 +142,22 @@ export class RustMLService {
   private buildContextPrompt(context: StoredMessage[], channelName: string): string {
     let prompt = '';
 
-    // Limit context to avoid token overflow
-    const limitedContext = context.slice(-8);
+    // Expand context window significantly for better conversation understanding
+    // BPE tokenization can handle much longer sequences efficiently
+    const limitedContext = context.slice(-32);  // 4x more context than before
 
     limitedContext.forEach(msg => {
-      const content = msg.content.length > 150 ? msg.content.substring(0, 150) + '...' : msg.content;
-      prompt += `${msg.authorName}: ${content}\n`;
+      // Remove aggressive content truncation - let the model see full messages
+      // Only truncate extremely long messages (>1000 chars) to prevent spam/paste dumps
+      const content = msg.content.length > 1000 ? msg.content.substring(0, 1000) + '...' : msg.content;
+
+      // Add conversation structure for better role understanding
+      const role = msg.authorName.toLowerCase() === 'krokenheimer' ? 'assistant' : 'user';
+      prompt += `${role}: ${content}\n`;
     });
 
-    prompt += 'Krokenheimer: ';
+    // Use consistent role format for generation
+    prompt += 'assistant: ';
     return prompt;
   }
 

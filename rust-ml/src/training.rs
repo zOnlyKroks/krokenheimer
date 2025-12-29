@@ -51,6 +51,14 @@ impl TrainingService {
         // Tokenize conversations
         let tokenized_data = self.tokenize_conversations(&conversations, &tokenizer)?;
 
+        // Split data into training and validation sets for better training monitoring
+        let validation_split = 0.2; // Use 20% for validation
+        let split_index = ((tokenized_data.len() as f32) * (1.0 - validation_split)) as usize;
+        let (train_data, val_data) = tokenized_data.split_at(split_index);
+
+        tracing::info!("Data split: {} training samples, {} validation samples",
+                      train_data.len(), val_data.len());
+
         // Create model - try to load existing weights for continued training
         let config = self.create_model_config(tokenizer.get_vocab_size(false));
 
@@ -80,7 +88,7 @@ impl TrainingService {
         let model = SimpleTransformer::load(&weights, &config, var_builder)?;
 
         // Training loop
-        self.train_model(&model, &var_map, &tokenized_data, epochs, &config)?;
+        self.train_model(&model, &var_map, train_data, val_data, epochs, &config)?;
 
         // Save model
         self.save_model(&model, &tokenizer, &config, &var_map, output_path)?;
@@ -96,13 +104,23 @@ impl TrainingService {
             .with_context(|| format!("Failed to read training data from {}", file_path))?;
 
         let mut conversations = Vec::new();
+        let mut filtered_count = 0;
+
         for (line_num, line) in content.lines().enumerate() {
             if line.trim().is_empty() {
                 continue;
             }
 
             match serde_json::from_str::<ConversationData>(line) {
-                Ok(conv_data) => conversations.push(conv_data),
+                Ok(conv_data) => {
+                    // Apply data quality filters
+                    let filtered_conv = self.apply_data_quality_filters(conv_data);
+                    if let Some(quality_conv) = filtered_conv {
+                        conversations.push(quality_conv);
+                    } else {
+                        filtered_count += 1;
+                    }
+                }
                 Err(e) => {
                     tracing::warn!("Skipping invalid JSON on line {}: {}", line_num + 1, e);
                     continue;
@@ -114,54 +132,129 @@ impl TrainingService {
             return Err(anyhow!("No valid conversations found in training data"));
         }
 
+        tracing::info!("Data quality: {} conversations retained, {} filtered out", conversations.len(), filtered_count);
+
         Ok(conversations)
     }
 
+    /// Apply data quality filters to improve training data
+    fn apply_data_quality_filters(&self, conv: ConversationData) -> Option<ConversationData> {
+        // Filter out conversations with too few messages (need context)
+        if conv.messages.len() < 3 {
+            return None;
+        }
+
+        let mut filtered_messages = Vec::new();
+
+        for message in conv.messages {
+            // Skip messages that are too short or contain only spam/noise
+            let trimmed_content = message.content.trim();
+
+            // Filter out very short messages (less than 3 characters)
+            if trimmed_content.len() < 3 {
+                continue;
+            }
+
+            // Filter out messages with only emoji or special characters
+            let alphanumeric_count = trimmed_content.chars().filter(|c| c.is_alphanumeric()).count();
+            if alphanumeric_count < 2 {
+                continue;
+            }
+
+            // Filter out messages that are just URLs or mostly URLs
+            let url_ratio = trimmed_content.matches("http").count() as f32 / trimmed_content.split_whitespace().count().max(1) as f32;
+            if url_ratio > 0.5 {
+                continue;
+            }
+
+            // Filter out excessive repetition (same character repeated more than 5 times)
+            let has_excessive_repetition = trimmed_content.chars()
+                .collect::<Vec<_>>()
+                .windows(6)
+                .any(|window| window.iter().all(|&c| c == window[0]));
+
+            if has_excessive_repetition {
+                continue;
+            }
+
+            // Keep the message if it passed all filters
+            filtered_messages.push(message);
+        }
+
+        // Only keep conversations with at least 2 quality messages
+        if filtered_messages.len() >= 2 {
+            Some(ConversationData {
+                channel: conv.channel,
+                timestamp: conv.timestamp,
+                messages: filtered_messages,
+            })
+        } else {
+            None
+        }
+    }
+
     fn create_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
-        tracing::info!("Creating simple tokenizer...");
+        tracing::info!("Creating BPE tokenizer for improved quality...");
 
-        // For now, create a basic character-level tokenizer since BPE training is complex
-        // In a real implementation, you'd use a pre-trained tokenizer or implement proper BPE training
+        // Use proper BPE tokenization instead of character-level for much better performance
+        // Start with a basic BPE model and train it on our data
 
-        // Collect unique characters
-        let mut chars = std::collections::HashSet::new();
+        // Collect all text for BPE training
+        let mut all_text = Vec::new();
         for conv in conversations {
             for message in &conv.messages {
-                for c in message.content.chars() {
-                    chars.insert(c);
-                }
+                // Add conversation structure for better context understanding
+                let formatted_message = format!("{}: {}", message.role, message.content);
+                all_text.push(formatted_message);
             }
         }
 
-        let mut vocab = std::collections::HashMap::new();
-        vocab.insert("[PAD]".to_string(), 0u32);
-        vocab.insert("[UNK]".to_string(), 1u32);
-        vocab.insert("[SEP]".to_string(), 2u32);
-        vocab.insert("<|endoftext|>".to_string(), 3u32);
+        let corpus = all_text.join("\n");
+        tracing::info!("Training BPE on {} characters of text", corpus.len());
 
-        let mut id = 4u32;
-        for c in chars {
-            vocab.insert(c.to_string(), id);
-            id += 1;
-        }
+        // Create BPE trainer with reasonable vocabulary size
+        let mut trainer = tokenizers::models::bpe::BpeTrainer::new()
+            .vocab_size(8000)  // Much more efficient than character-level
+            .min_frequency(2)  // Require at least 2 occurrences
+            .special_tokens(vec![
+                "[PAD]".to_string(),
+                "[UNK]".to_string(),
+                "[SEP]".to_string(),
+                "<|endoftext|>".to_string(),
+                "<|user|>".to_string(),
+                "<|assistant|>".to_string(),
+                "<|system|>".to_string(),
+            ]);
 
-        // Create a simple word-piece model with our vocabulary
-        let model = tokenizers::models::wordpiece::WordPiece::builder()
-            .vocab(vocab.clone().into_iter().collect::<ahash::AHashMap<String, u32>>())
-            .unk_token("[UNK]".to_string())
-            .build()
-            .map_err(|e| anyhow!("Failed to build tokenizer model: {}", e))?;
-
+        // Create empty BPE model
+        let model = tokenizers::models::bpe::Bpe::default();
         let mut tokenizer = Tokenizer::new(model);
 
-        // Set pre-tokenizer
-        tokenizer.with_pre_tokenizer(Some(ByteLevel::new(false, false, true)));
+        // Set up pre-tokenization to split on whitespace and punctuation
+        use tokenizers::pre_tokenizers::whitespace::Whitespace;
+        tokenizer.with_pre_tokenizer(Some(Whitespace {}));
 
-        // Set decoder
-        tokenizer.with_decoder(Some(ByteLevelDecoder::new(false, false, true)));
+        // Train the tokenizer on our corpus
+        let corpus_iter = std::iter::once(corpus.as_str());
+        tokenizer.train_from_iterator(&mut trainer, corpus_iter)
+            .map_err(|e| anyhow!("Failed to train BPE tokenizer: {}", e))?;
 
-        // Set post-processor
-        tokenizer.with_post_processor(Some(ByteLevelProcessor::new(false, false, true)));
+        // Set up proper decoding
+        use tokenizers::decoders::bpe::BPEDecoder;
+        tokenizer.with_decoder(Some(BPEDecoder::new()));
+
+        // Add special tokens for conversation structure
+        let special_tokens: Vec<tokenizers::AddedToken> = vec![
+            "[PAD]".into(),
+            "[UNK]".into(),
+            "[SEP]".into(),
+            "<|endoftext|>".into(),
+            "<|user|>".into(),
+            "<|assistant|>".into(),
+            "<|system|>".into(),
+        ];
+
+        tokenizer.add_special_tokens(&special_tokens);
 
         // Save tokenizer
         let tokenizer_path = Path::new(output_path).join("tokenizer.json");
@@ -171,7 +264,17 @@ impl TrainingService {
         tokenizer.save(&tokenizer_path, false)
             .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
 
+        let vocab_size = tokenizer.get_vocab_size(true);
+        tracing::info!("✅ BPE tokenizer created with vocab size: {}", vocab_size);
         tracing::info!("Tokenizer saved to: {}", tokenizer_path.display());
+
+        // Test tokenization quality
+        let test_text = "Hello! How are you doing today?";
+        if let Ok(encoding) = tokenizer.encode(test_text, false) {
+            let tokens = encoding.get_tokens();
+            tracing::info!("Test tokenization: '{}' -> {} tokens: {:?}", test_text, tokens.len(), tokens);
+        }
+
         Ok(tokenizer)
     }
 
@@ -226,7 +329,8 @@ impl TrainingService {
         &self,
         model: &SimpleTransformer,
         var_map: &VarMap,
-        tokenized_data: &[Vec<u32>],
+        train_data: &[Vec<u32>],
+        val_data: &[Vec<u32>],
         epochs: u32,
         _config: &Gpt2Config,
     ) -> Result<()> {
@@ -247,9 +351,19 @@ impl TrainingService {
             }
         )?;
 
-        let total_batches = (tokenized_data.len() + batch_size - 1) / batch_size;
+        let total_batches = (train_data.len() + batch_size - 1) / batch_size;
         tracing::info!("Training configuration: batch_size={}, sequence_length={}, total_batches={}",
                       batch_size, max_sequence_length, total_batches);
+
+        // Early stopping variables
+        let mut best_val_loss = f32::INFINITY;
+        let mut patience_counter = 0;
+        let patience = 3; // Stop after 3 epochs without improvement
+
+        // Learning rate scheduling variables
+        let initial_lr = 5e-5;
+        let lr_decay_factor = 0.8; // Reduce LR by 20% when validation doesn't improve
+        let mut current_lr = initial_lr;
 
         for epoch in 1..=epochs {
             tracing::info!("Epoch {}/{} - Processing {} batches", epoch, epochs, total_batches);
@@ -257,10 +371,10 @@ impl TrainingService {
             let mut batch_count = 0;
             let epoch_start = std::time::Instant::now();
 
-            // Process data in batches
-            for batch_start in (0..tokenized_data.len()).step_by(batch_size) {
-                let batch_end = (batch_start + batch_size).min(tokenized_data.len());
-                let batch = &tokenized_data[batch_start..batch_end];
+            // Training phase
+            for batch_start in (0..train_data.len()).step_by(batch_size) {
+                let batch_end = (batch_start + batch_size).min(train_data.len());
+                let batch = &train_data[batch_start..batch_end];
 
                 // Prepare batch tensors
                 let (input_ids, labels) = self.prepare_batch(batch, max_sequence_length)?;
@@ -293,18 +407,95 @@ impl TrainingService {
             }
 
             let epoch_duration = epoch_start.elapsed();
-            let avg_loss = total_loss / batch_count as f32;
+            let avg_train_loss = total_loss / batch_count as f32;
             let batches_per_sec = batch_count as f64 / epoch_duration.as_secs_f64();
+
+            // Validation phase - evaluate on validation set
+            let val_loss = self.evaluate_on_validation_set(model, val_data, batch_size, max_sequence_length)?;
 
             let remaining_epochs = epochs - epoch;
             let estimated_remaining = epoch_duration * remaining_epochs;
 
-            tracing::info!("Epoch {} completed in {:.1}s. Loss: {:.4}, Speed: {:.1} batches/sec, ETA: {:.1}min",
-                          epoch, epoch_duration.as_secs_f64(), avg_loss, batches_per_sec,
+            tracing::info!("Epoch {} completed in {:.1}s. Train Loss: {:.4}, Val Loss: {:.4}, LR: {:.2e}, Speed: {:.1} batches/sec, ETA: {:.1}min",
+                          epoch, epoch_duration.as_secs_f64(), avg_train_loss, val_loss, current_lr, batches_per_sec,
                           estimated_remaining.as_secs_f64() / 60.0);
+
+            // Learning rate scheduling and early stopping check
+            if val_loss < best_val_loss {
+                best_val_loss = val_loss;
+                patience_counter = 0;
+                tracing::info!("✅ New best validation loss: {:.4}", best_val_loss);
+            } else {
+                patience_counter += 1;
+                tracing::warn!("⚠️ Validation loss did not improve. Patience: {}/{}", patience_counter, patience);
+
+                // Reduce learning rate when validation doesn't improve
+                if patience_counter == 2 {
+                    current_lr *= lr_decay_factor;
+                    tracing::info!("📉 Learning rate reduced to {:.2e}", current_lr);
+
+                    // Create new optimizer with reduced learning rate
+                    optimizer = AdamW::new(
+                        var_map.all_vars(),
+                        candle_nn::ParamsAdamW {
+                            lr: current_lr,
+                            beta1: 0.9,
+                            beta2: 0.999,
+                            eps: 1e-8,
+                            weight_decay: 0.01,
+                        }
+                    )?;
+                }
+
+                if patience_counter >= patience {
+                    tracing::info!("🛑 Early stopping triggered after {} epochs without improvement", patience);
+                    break;
+                }
+            }
         }
 
         Ok(())
+    }
+
+    /// Evaluate model performance on validation set without updating weights
+    fn evaluate_on_validation_set(
+        &self,
+        model: &SimpleTransformer,
+        val_data: &[Vec<u32>],
+        batch_size: usize,
+        max_sequence_length: usize,
+    ) -> Result<f32> {
+        let mut total_val_loss = 0.0;
+        let mut val_batch_count = 0;
+
+        // Process validation data in batches (no gradient computation)
+        for batch_start in (0..val_data.len()).step_by(batch_size) {
+            let batch_end = (batch_start + batch_size).min(val_data.len());
+            let batch = &val_data[batch_start..batch_end];
+
+            // Prepare batch tensors
+            let (input_ids, labels) = self.prepare_batch(batch, max_sequence_length)?;
+
+            // Check if batch is valid
+            let batch_dims = input_ids.dims();
+            if batch_dims.len() == 0 || batch_dims.iter().any(|&d| d == 0) {
+                continue;
+            }
+
+            // Forward pass only (no backward pass for validation)
+            let logits = model.forward(&input_ids)?;
+
+            // Calculate validation loss
+            let loss = self.calculate_loss(&logits, &labels)?;
+            total_val_loss += loss.to_scalar::<f32>()?;
+            val_batch_count += 1;
+        }
+
+        if val_batch_count == 0 {
+            Ok(f32::INFINITY) // Return high loss if no valid batches
+        } else {
+            Ok(total_val_loss / val_batch_count as f32)
+        }
     }
 
     fn prepare_batch(&self, batch: &[Vec<u32>], max_length: usize) -> Result<(Tensor, Tensor)> {
