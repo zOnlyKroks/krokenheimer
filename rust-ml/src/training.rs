@@ -122,7 +122,7 @@ impl TrainingService {
 
         // Create a simple word-piece model with our vocabulary
         let model = tokenizers::models::wordpiece::WordPiece::builder()
-            .vocab(vocab.clone())
+            .vocab(vocab.clone().into_iter().collect::<ahash::AHashMap<String, u32>>())
             .unk_token("[UNK]".to_string())
             .build()
             .map_err(|e| anyhow!("Failed to build tokenizer model: {}", e))?;
