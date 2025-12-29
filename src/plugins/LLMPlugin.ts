@@ -175,8 +175,6 @@ export class LLMPlugin implements BotPlugin {
       // Generate a response using YOUR trained model (this takes time)
       const response = await rustMLService.generateMentionResponse(recentMessages, message.content, message.author.username);
 
-      console.log(response)
-
       // Validate response is not empty
       if (!response || response.trim().length === 0) {
         console.warn('⚠️  Model generated empty response, using fallback');

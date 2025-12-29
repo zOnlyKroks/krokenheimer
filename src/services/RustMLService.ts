@@ -106,18 +106,6 @@ export class RustMLService {
     }
   }
 
-  async generateMentionResponse(context: StoredMessage[], messageContent: string, authorName: string): Promise<string | undefined> {
-    if (!this.isInitialized) {
-      await this.initialize();
-    }
-
-    if (this.rustModule) {
-      return this.generateMentionWithRust(context, messageContent, authorName);
-    }
-
-    return undefined;
-  }
-
   private async generateWithRust(context: StoredMessage[], channelName: string, channelId?: string): Promise<string | undefined> {
     try {
       // Build context for Rust module
