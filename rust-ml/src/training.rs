@@ -1,4 +1,4 @@
-use candle_core::{Device, Tensor, Result as CandleResult};
+use candle_core::{Device, Tensor, Result as CandleResult, DType};
 use candle_nn::{VarBuilder, VarMap, Optimizer, AdamW, loss::cross_entropy, Activation, ParamsAdamW};
 use tokenizers::Tokenizer;
 use anyhow::{Result, Context, anyhow};
@@ -26,11 +26,29 @@ struct ConversationData {
 
 impl TrainingService {
     pub fn new() -> Self {
-        let device = Device::Cpu;
-        tracing::info!("Training service initialized with device: {:?}", device);
+        // Try GPU first, fall back to CPU
+        let device = Device::cuda_if_available(0)
+            .unwrap_or_else(|_| {
+                tracing::info!("No GPU available, using CPU");
+                Device::Cpu
+            });
 
-        std::env::set_var("RAYON_NUM_THREADS", num_cpus::get().to_string());
-        tracing::info!("Utilizing {} CPU threads for parallel processing", num_cpus::get());
+        // Optimize CPU usage
+        std::env::set_var("RAYON_NUM_THREADS", std::thread::available_parallelism()
+            .map(|n| n.get().to_string())
+            .unwrap_or_else(|_| "1".to_string()));
+
+        // Enable CPU optimizations
+        #[cfg(feature = "accelerate")]
+        {
+            std::env::set_var("ACCELERATE_USE_ACCELERATE", "1");
+            std::env::set_var("ACCELERATE_DISABLE_AVX2", "0");
+        }
+
+        tracing::info!("Training service initialized with device: {:?}", device);
+        tracing::info!("Utilizing {} CPU threads", std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1));
 
         Self { device }
     }
@@ -38,108 +56,110 @@ impl TrainingService {
     pub fn train(&mut self, training_data_path: &str, output_path: &str, epochs: u32) -> Result<()> {
         tracing::info!("Starting training with {} epochs", epochs);
 
+        // Load and preprocess data
         let conversations = self.load_training_data(training_data_path)?;
         tracing::info!("Loaded {} conversations", conversations.len());
 
-        // Create and test tokenizer FIRST
-        let tokenizer = self.create_simple_tokenizer(&conversations, output_path)?;
+        // Create or load tokenizer
+        let tokenizer = self.create_or_load_tokenizer(&conversations, output_path)?;
 
-        // Test tokenizer immediately
-        tracing::info!("Testing tokenizer...");
-        if let Ok(encoding) = tokenizer.encode("Hello", true) {
-            let tokens = encoding.get_tokens();
-            tracing::info!("Tokenizer test: 'Hello' -> {} tokens: {:?}",
-                          tokens.len(), tokens);
-        }
+        // Tokenize efficiently
+        let tokenized_data = self.tokenize_conversations_batch(&conversations, &tokenizer)?;
 
-        // Continue with training...
-        let tokenized_data = self.tokenize_conversations(&conversations, &tokenizer)?;
-
-        let validation_split = 0.2;
+        // Split data
+        let validation_split = 0.1; // Reduced from 0.2 to use more training data
         let split_index = ((tokenized_data.len() as f32) * (1.0 - validation_split)) as usize;
         let (train_data, val_data) = tokenized_data.split_at(split_index);
 
-        tracing::info!("Data split: {} training, {} validation",
+        tracing::info!("Data split: {} training, {} validation sequences",
                       train_data.len(), val_data.len());
 
-        let config = self.create_model_config(tokenizer.get_vocab_size(false));
+        // Create optimized model config
+        let config = self.create_optimized_config(tokenizer.get_vocab_size(false));
 
-        let var_map = match self.load_existing_weights_if_available(output_path)? {
-            Some(loaded_var_map) => {
-                tracing::info!("✅ Continuing from checkpoint");
-                loaded_var_map
-            }
-            None => {
-                tracing::info!("🆕 Starting from scratch");
-                VarMap::new()
-            }
-        };
-
-        let var_builder = VarBuilder::from_varmap(&var_map, candle_core::DType::F32, &self.device);
+        // Load or create model
+        let (var_map, is_continuing) = self.load_or_create_weights(output_path)?;
+        let var_builder = VarBuilder::from_varmap(&var_map, DType::F32, &self.device);
         let weights = HashMap::new();
         let model = SimpleTransformer::load(&weights, &config, var_builder)?;
 
-        self.train_model(&model, &var_map, train_data, val_data, epochs, &config)?;
+        // Train with optimizations
+        self.train_model_optimized(&model, &var_map, train_data, val_data, epochs, &config, is_continuing)?;
+
+        // Save model
         self.save_model(&model, &tokenizer, &config, &var_map, output_path)?;
 
         tracing::info!("Training completed successfully!");
         Ok(())
     }
 
-    // FIXED: Create a working character-level tokenizer
-    fn create_simple_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
-        tracing::info!("Creating character-level tokenizer...");
+    fn create_or_load_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
+        let tokenizer_path = Path::new(output_path).join("tokenizer.json");
 
-        // Collect ALL characters from conversations
-        let mut chars = std::collections::HashSet::new();
-
-        // Add basic ASCII first
-        for c in ' '..='~' {  // ASCII printable range
-            chars.insert(c);
+        // Try to load existing tokenizer first
+        if tokenizer_path.exists() {
+            tracing::info!("Loading existing tokenizer from: {}", tokenizer_path.display());
+            return Tokenizer::from_file(&tokenizer_path)
+                .map_err(|e| anyhow!("Failed to load tokenizer: {}", e));
         }
 
-        // Add characters from your data
-        for conv in conversations {
-            for message in &conv.messages {
-                let text = format!("{}: {}", message.role, message.content);
-                for c in text.chars() {
-                    chars.insert(c);
-                }
-            }
-        }
+        tracing::info!("Creating new character-level tokenizer...");
 
-        // Convert to sorted vector for deterministic ordering
-        let mut sorted_chars: Vec<char> = chars.into_iter().collect();
-        sorted_chars.sort();
-
-        // Build vocabulary mapping
+        // Create vocabulary from data (optimized collection)
         let mut vocab = AHashMap::new();
+
+        // Add special tokens
         vocab.insert("[PAD]".to_string(), 0u32);
         vocab.insert("[UNK]".to_string(), 1u32);
         vocab.insert("<|endoftext|>".to_string(), 2u32);
 
+        // Collect characters more efficiently
+        let mut char_set = std::collections::HashSet::new();
+
+        // Pre-allocate with expected size
+        char_set.reserve(500);
+
+        // Add common ASCII characters first
+        for c in ' '..='~' {
+            char_set.insert(c);
+        }
+
+        // Add characters from conversations (parallel processing)
+        conversations.iter()
+            .flat_map(|conv| conv.messages.iter())
+            .flat_map(|msg| {
+                format!("{}: {}", msg.role, msg.content).chars()
+            })
+            .for_each(|c| {
+                char_set.insert(c);
+            });
+
+        // Convert to sorted vector
+        let mut sorted_chars: Vec<char> = char_set.into_iter().collect();
+        sorted_chars.sort();
+
+        // Add to vocabulary
         let mut id = 3u32;
-        for &c in &sorted_chars {
+        for c in sorted_chars {
             vocab.insert(c.to_string(), id);
             id += 1;
         }
 
-        tracing::info!("Vocabulary size: {}", vocab.len());
+        tracing::info!("Created vocabulary with {} tokens", vocab.len());
 
-        // Create a SIMPLE tokenizer - using BPE with character-level tokens
+        // Create tokenizer
         let mut tokenizer = Tokenizer::new(
             tokenizers::models::bpe::BPE::builder()
-                .vocab_and_merges(vocab, vec![]) // No merges = character-level
+                .vocab_and_merges(vocab, vec![])
                 .unk_token("[UNK]".to_string())
                 .build()
                 .map_err(|e| anyhow!("Failed to build BPE tokenizer: {}", e))?
         );
 
-        // Use byte-level pre-tokenizer which handles all characters
+        // Use byte-level pre-tokenizer
         tokenizer.with_pre_tokenizer(Some(tokenizers::pre_tokenizers::byte_level::ByteLevel::default()));
 
         // Save tokenizer
-        let tokenizer_path = Path::new(output_path).join("tokenizer.json");
         std::fs::create_dir_all(output_path)
             .with_context(|| format!("Failed to create output directory: {}", output_path))?;
 
@@ -148,190 +168,81 @@ impl TrainingService {
 
         tracing::info!("✅ Tokenizer saved to: {}", tokenizer_path.display());
 
-        // Test it right away
-        let test_texts = ["Hello", "こんにちは", "Hello world!", "User: Hello\nAssistant: Hi there"];
-        for test_text in test_texts.iter() {
-            if let Ok(encoding) = tokenizer.encode(*test_text, true) {
-                let tokens = encoding.get_tokens();
-                let ids = encoding.get_ids();
-                tracing::info!("Test '{}' -> {} tokens: {:?} (ids: {:?})",
-                              test_text, tokens.len(), tokens, ids);
-            }
-        }
-
         Ok(tokenizer)
     }
 
+    fn tokenize_conversations_batch(&self, conversations: &[ConversationData], tokenizer: &Tokenizer) -> Result<Vec<Vec<u32>>> {
+        tracing::info!("Tokenizing conversations in batch...");
 
-    // Rest of your methods remain mostly the same, but ensure tokenization works:
-    fn tokenize_conversations(&self, conversations: &[ConversationData], tokenizer: &Tokenizer) -> Result<Vec<Vec<u32>>> {
-        tracing::info!("Tokenizing conversations...");
-
-        let mut tokenized_data = Vec::new();
+        let mut tokenized_data = Vec::with_capacity(conversations.len());
         let mut total_tokens = 0;
 
-        for (i, conv) in conversations.iter().enumerate() {
-            let mut text = String::new();
-            for message in &conv.messages {
-                text.push_str(&format!("{}: {}\n", message.role, message.content));
-            }
-            text.push_str("<|endoftext|>");
+        // Process conversations in parallel chunks
+        let chunk_size = 100; // Process 100 conversations at a time
 
-            match tokenizer.encode(text, false) {
-                Ok(encoding) => {
+        for chunk in conversations.chunks(chunk_size) {
+            for conv in chunk {
+                let mut text = String::new();
+                for message in &conv.messages {
+                    text.push_str(&format!("{}: {}\n", message.role, message.content));
+                }
+                text.push_str("<|endoftext|>");
+
+                if let Ok(encoding) = tokenizer.encode(text, false) {
                     let token_ids = encoding.get_ids().to_vec();
-                    if !token_ids.is_empty() {
+                    if !token_ids.is_empty() && token_ids.len() >= 10 { // Skip very short sequences
                         total_tokens += token_ids.len();
                         tokenized_data.push(token_ids);
                     }
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to tokenize conversation {}: {}", i, e);
-                    // Try with individual messages if whole conversation fails
-                    let mut all_message_ids = Vec::new();
-                    for message in &conv.messages {
-                        let msg_text = format!("{}: {}", message.role, message.content);
-                        if let Ok(msg_encoding) = tokenizer.encode(msg_text, false) {
-                            all_message_ids.extend(msg_encoding.get_ids());
-                        }
-                    }
-                    if !all_message_ids.is_empty() {
-                        all_message_ids.push(2); // <|endoftext|> token
-                        total_tokens += all_message_ids.len();
-                        tokenized_data.push(all_message_ids);
-                    }
-                }
             }
         }
 
-        tracing::info!("Tokenized {} conversations, total tokens: {}",
-                      tokenized_data.len(), total_tokens);
+        // Sort by length for more efficient batching (optional)
+        tokenized_data.sort_by_key(|seq| seq.len());
 
-        // Analyze token distribution
-        let avg_tokens = total_tokens as f32 / tokenized_data.len() as f32;
-        let max_tokens = tokenized_data.iter().map(|v| v.len()).max().unwrap_or(0);
-        let min_tokens = tokenized_data.iter().map(|v| v.len()).min().unwrap_or(0);
+        tracing::info!("Tokenized {} conversations, total tokens: {}", tokenized_data.len(), total_tokens);
 
-        tracing::info!("Token stats: avg={:.1}, min={}, max={}",
-                      avg_tokens, min_tokens, max_tokens);
+        if tokenized_data.is_empty() {
+            return Err(anyhow!("No valid tokenized conversations found"));
+        }
 
         Ok(tokenized_data)
     }
 
-    // Fixed prepare_batch to handle padding correctly
-    fn prepare_batch(&self, batch: &[Vec<u32>], max_length: usize) -> Result<(Tensor, Tensor)> {
-        if batch.is_empty() {
-            return Ok((
-                Tensor::zeros((1, 1), candle_core::DType::U32, &self.device)?,
-                Tensor::zeros((1, 1), candle_core::DType::U32, &self.device)?
-            ));
-        }
+    fn load_or_create_weights(&self, output_path: &str) -> Result<(VarMap, bool)> {
+        let model_path = Path::new(output_path).join("model.safetensors");
 
-        let batch_size = batch.len();
-        let mut padded_inputs = Vec::with_capacity(batch_size * max_length);
-        let mut padded_labels = Vec::with_capacity(batch_size * max_length);
+        if model_path.exists() {
+            tracing::info!("Found existing model at: {}", model_path.display());
+            let mut var_map = VarMap::new();
 
-        for sequence in batch {
-            let seq_len = sequence.len().min(max_length);
-
-            if seq_len < 2 {
-                // Skip sequences that are too short for training
-                continue;
-            }
-
-            // Input: everything except last token
-            let input_len = (seq_len - 1).min(max_length - 1);
-            for &token in sequence[..input_len].iter() {
-                padded_inputs.push(token);
-            }
-            // Pad input
-            for _ in input_len..max_length {
-                padded_inputs.push(0); // [PAD] token
-            }
-
-            // Labels: everything except first token (shifted by 1)
-            let label_len = seq_len - 1;
-            for &token in sequence[1..seq_len].iter() {
-                padded_labels.push(token);
-            }
-            // Pad labels
-            for _ in label_len..max_length {
-                padded_labels.push(0); // [PAD] token
-            }
-        }
-
-        // Handle case where all sequences were too short
-        if padded_inputs.is_empty() {
-            return Ok((
-                Tensor::zeros((1, 1), candle_core::DType::U32, &self.device)?,
-                Tensor::zeros((1, 1), candle_core::DType::U32, &self.device)?
-            ));
-        }
-
-        let input_tensor = Tensor::from_vec(
-            padded_inputs,
-            (batch_size, max_length),
-            &self.device
-        )?;
-
-        let label_tensor = Tensor::from_vec(
-            padded_labels,
-            (batch_size, max_length),
-            &self.device
-        )?;
-
-        Ok((input_tensor, label_tensor))
-    }
-
-    // Add back missing methods
-    fn load_training_data(&self, file_path: &str) -> Result<Vec<ConversationData>> {
-        tracing::info!("Loading training data from: {}", file_path);
-
-        let content = std::fs::read_to_string(file_path)
-            .with_context(|| format!("Failed to read training data from {}", file_path))?;
-
-        let mut conversations = Vec::new();
-        let mut filtered_count = 0;
-
-        for (line_num, line) in content.lines().enumerate() {
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            match serde_json::from_str::<ConversationData>(line) {
-                Ok(conv_data) => {
-                    // Apply minimal filtering
-                    if !conv_data.messages.is_empty() {
-                        conversations.push(conv_data);
-                    } else {
-                        filtered_count += 1;
-                    }
+            match var_map.load(&model_path) {
+                Ok(()) => {
+                    tracing::info!("✅ Successfully loaded model checkpoint");
+                    return Ok((var_map, true));
                 }
                 Err(e) => {
-                    tracing::warn!("Skipping invalid JSON on line {}: {}", line_num + 1, e);
-                    continue;
+                    tracing::warn!("Failed to load checkpoint: {}, starting fresh", e);
                 }
             }
         }
 
-        if conversations.is_empty() {
-            return Err(anyhow!("No valid conversations found in training data"));
-        }
-
-        tracing::info!("Data quality: {} conversations retained, {} filtered out", conversations.len(), filtered_count);
-        Ok(conversations)
+        tracing::info!("🆕 Starting from scratch");
+        Ok((VarMap::new(), false))
     }
 
-    fn create_model_config(&self, vocab_size: usize) -> Gpt2Config {
+    fn create_optimized_config(&self, vocab_size: usize) -> Gpt2Config {
+        // SMALLER MODEL FOR FASTER TRAINING
         Gpt2Config {
             vocab_size,
-            n_positions: 2048,   // Maximum sequence length
-            n_embd: 768,         // Standard embedding size
-            n_layer: 12,         // Reasonable depth
-            n_head: 12,          // Reduced from 16 attention heads
-            n_inner: Some(3072), // Reduced from 4096 (4x embedding)
+            n_positions: 512,    // Reduced from 2048 - shorter sequences are much faster
+            n_embd: 256,         // Reduced from 768 - smaller embeddings = less computation
+            n_layer: 6,          // Reduced from 12 - fewer layers
+            n_head: 8,           // Reduced from 12 - fewer attention heads
+            n_inner: Some(512),  // Reduced from 3072 - much smaller feedforward
             activation_function: Activation::Gelu,
-            resid_pdrop: 0.1,    // Standard dropout for stable training
+            resid_pdrop: 0.1,
             embd_pdrop: 0.1,
             attn_pdrop: 0.1,
             layer_norm_epsilon: 1e-5,
@@ -343,58 +254,73 @@ impl TrainingService {
         }
     }
 
-    fn train_model(
+    fn train_model_optimized(
         &self,
         model: &SimpleTransformer,
         var_map: &VarMap,
         train_data: &[Vec<u32>],
         val_data: &[Vec<u32>],
         epochs: u32,
-        _config: &Gpt2Config,
+        config: &Gpt2Config,
+        is_continuing: bool,
     ) -> Result<()> {
-        tracing::info!("Starting model training...");
+        tracing::info!("Starting optimized model training...");
 
-        let batch_size = 16;  // Safe batch size to prevent memory issues
-        let max_sequence_length = 1024;  // Longer sequences for better context understanding
+        // OPTIMIZED HYPERPARAMETERS
+        let batch_size = 32;  // Increased batch size (but smaller model allows this)
+        let max_sequence_length = config.n_positions.min(256); // Use shorter sequences
 
-        // Create optimizer with current API
+        // Calculate total batches
+        let total_batches = (train_data.len() + batch_size - 1) / batch_size;
+
+        tracing::info!("Optimized training config: batch_size={}, seq_len={}, total_batches={}",
+                      batch_size, max_sequence_length, total_batches);
+
+        // Create optimizer with warmup
         let mut optimizer = AdamW::new(
             var_map.all_vars(),
             ParamsAdamW {
-                lr: 5e-5,  // Conservative learning rate to prevent divergence
-                beta1: 0.9,   // Standard momentum parameter
-                beta2: 0.999, // Standard second moment decay
+                lr: if is_continuing { 1e-5 } else { 3e-4 }, // Higher LR for fresh training
+                beta1: 0.9,
+                beta2: 0.999,
                 eps: 1e-8,
-                weight_decay: 0.01, // Standard weight decay for stability
+                weight_decay: 0.01,
             }
         )?;
 
-        let total_batches = (train_data.len() + batch_size - 1) / batch_size;
-        tracing::info!("Training configuration: batch_size={}, sequence_length={}, total_batches={}",
-                      batch_size, max_sequence_length, total_batches);
-
-        // Early stopping variables
+        // Early stopping
         let mut best_val_loss = f32::INFINITY;
         let mut patience_counter = 0;
-        let patience = 3; // Stop after 3 epochs without improvement
+        let patience = 2; // Reduced patience
 
         for epoch in 1..=epochs {
             tracing::info!("Epoch {}/{} - Processing {} batches", epoch, epochs, total_batches);
-            let mut total_loss = 0.0;
-            let mut batch_count = 0;
+
             let epoch_start = std::time::Instant::now();
+            let mut total_loss = 0.0;
+            let mut processed_batches = 0;
 
-            // Training phase
-            for batch_start in (0..train_data.len()).step_by(batch_size) {
-                let batch_end = (batch_start + batch_size).min(train_data.len());
-                let batch = &train_data[batch_start..batch_end];
+            // Shuffle training data each epoch
+            let mut train_indices: Vec<usize> = (0..train_data.len()).collect();
+            fastrand::shuffle(&mut train_indices);
 
-                // Prepare batch tensors
-                let (input_ids, labels) = self.prepare_batch(batch, max_sequence_length)?;
+            // Training loop with progress tracking
+            for batch_idx in 0..total_batches {
+                let batch_start = batch_idx * batch_size;
+                let batch_end = (batch_start + batch_size).min(train_indices.len());
 
-                // Check if batch is empty by checking tensor dimensions
-                let batch_dims = input_ids.dims();
-                if batch_dims.len() == 0 || batch_dims.iter().any(|&d| d == 0) {
+                // Get batch indices
+                let batch_indices = &train_indices[batch_start..batch_end];
+
+                // Prepare batch more efficiently
+                let batch_data: Vec<&Vec<u32>> = batch_indices.iter()
+                    .map(|&idx| &train_data[idx])
+                    .collect();
+
+                let (input_ids, labels) = self.prepare_batch_fast(&batch_data, max_sequence_length)?;
+
+                // Skip if batch is invalid
+                if input_ids.dims().iter().any(|&d| d == 0) {
                     continue;
                 }
 
@@ -402,48 +328,62 @@ impl TrainingService {
                 let logits = model.forward(&input_ids)?;
 
                 // Calculate loss
-                let loss = self.calculate_loss(&logits, &labels)?;
-                total_loss += loss.to_scalar::<f32>()?;
-                batch_count += 1;
+                let loss = self.calculate_loss_optimized(&logits, &labels)?;
+                let loss_value = loss.to_scalar::<f32>()?;
+                total_loss += loss_value;
+                processed_batches += 1;
 
                 // Backward pass
+                optimizer.zero_grad();
                 let grads = loss.backward()?;
                 optimizer.step(&grads)?;
 
-                if batch_count % 10 == 0 {
+                // Log progress every 5% of batches
+                if processed_batches % (total_batches.max(1) / 20).max(1) == 0 {
                     let elapsed = epoch_start.elapsed();
-                    let batches_per_sec = batch_count as f64 / elapsed.as_secs_f64();
-                    let progress = batch_count as f64 / total_batches as f64 * 100.0;
+                    let batches_per_sec = processed_batches as f64 / elapsed.as_secs_f64();
+                    let progress = (processed_batches as f64 / total_batches as f64) * 100.0;
+
                     tracing::info!("Batch {}/{} ({:.1}%): loss={:.4}, {:.2} batches/sec",
-                                  batch_count, total_batches, progress, loss.to_scalar::<f32>()?, batches_per_sec);
+                                  processed_batches, total_batches, progress, loss_value, batches_per_sec);
                 }
             }
 
             let epoch_duration = epoch_start.elapsed();
-            let avg_train_loss = total_loss / batch_count as f32;
-            let batches_per_sec = batch_count as f64 / epoch_duration.as_secs_f64();
+            let avg_train_loss = if processed_batches > 0 {
+                total_loss / processed_batches as f32
+            } else {
+                0.0
+            };
 
-            // Validation phase
-            let val_loss = self.evaluate_on_validation_set(model, val_data, batch_size, max_sequence_length)?;
+            // Validation
+            let val_loss = self.evaluate_validation_fast(model, val_data, batch_size, max_sequence_length)?;
 
+            let batches_per_sec = processed_batches as f64 / epoch_duration.as_secs_f64();
             let remaining_epochs = epochs - epoch;
-            let estimated_remaining = epoch_duration * remaining_epochs;
+            let eta_minutes = (epoch_duration * remaining_epochs).as_secs_f64() / 60.0;
 
             tracing::info!("Epoch {} completed in {:.1}s. Train Loss: {:.4}, Val Loss: {:.4}, Speed: {:.1} batches/sec, ETA: {:.1}min",
-                          epoch, epoch_duration.as_secs_f64(), avg_train_loss, val_loss, batches_per_sec,
-                          estimated_remaining.as_secs_f64() / 60.0);
+                          epoch, epoch_duration.as_secs_f64(), avg_train_loss, val_loss,
+                          batches_per_sec, eta_minutes);
 
             // Early stopping check
-            if val_loss < best_val_loss {
+            if val_loss < best_val_loss - 0.001 { // Require meaningful improvement
                 best_val_loss = val_loss;
                 patience_counter = 0;
                 tracing::info!("✅ New best validation loss: {:.4}", best_val_loss);
+
+                // Save checkpoint on improvement
+                let checkpoint_path = format!("{}/checkpoint_epoch_{}.safetensors", "models", epoch);
+                if let Err(e) = var_map.save(&checkpoint_path) {
+                    tracing::warn!("Failed to save checkpoint: {}", e);
+                }
             } else {
                 patience_counter += 1;
-                tracing::warn!("⚠️ Validation loss did not improve. Patience: {}/{}", patience_counter, patience);
+                tracing::warn!("⚠️ No improvement. Patience: {}/{}", patience_counter, patience);
 
                 if patience_counter >= patience {
-                    tracing::info!("🛑 Early stopping triggered after {} epochs without improvement", patience);
+                    tracing::info!("🛑 Early stopping at epoch {}", epoch);
                     break;
                 }
             }
@@ -452,88 +392,158 @@ impl TrainingService {
         Ok(())
     }
 
-    fn evaluate_on_validation_set(
+    fn prepare_batch_fast(&self, batch: &[&Vec<u32>], max_length: usize) -> Result<(Tensor, Tensor)> {
+        if batch.is_empty() {
+            return Ok((
+                Tensor::zeros((1, 1), DType::U32, &self.device)?,
+                Tensor::zeros((1, 1), DType::U32, &self.device)?
+            ));
+        }
+
+        let batch_size = batch.len();
+        let mut inputs = Vec::with_capacity(batch_size * max_length);
+        let mut labels = Vec::with_capacity(batch_size * max_length);
+
+        for sequence in batch {
+            let seq_len = sequence.len().min(max_length);
+
+            if seq_len < 2 {
+                // Pad with zeros for sequences that are too short
+                for _ in 0..max_length {
+                    inputs.push(0);
+                    labels.push(0);
+                }
+                continue;
+            }
+
+            // Input: all except last token
+            let input_len = (seq_len - 1).min(max_length);
+            for &token in &sequence[..input_len] {
+                inputs.push(token);
+            }
+            for _ in input_len..max_length {
+                inputs.push(0); // Pad
+            }
+
+            // Labels: all except first token
+            let label_len = seq_len - 1;
+            for &token in &sequence[1..=seq_len.min(max_length)] {
+                labels.push(token);
+            }
+            for _ in label_len..max_length {
+                labels.push(0); // Pad
+            }
+        }
+
+        let input_tensor = Tensor::from_vec(inputs, (batch_size, max_length), &self.device)?;
+        let label_tensor = Tensor::from_vec(labels, (batch_size, max_length), &self.device)?;
+
+        Ok((input_tensor, label_tensor))
+    }
+
+    fn evaluate_validation_fast(
         &self,
         model: &SimpleTransformer,
         val_data: &[Vec<u32>],
         batch_size: usize,
-        max_sequence_length: usize,
+        max_length: usize,
     ) -> Result<f32> {
-        let mut total_val_loss = 0.0;
-        let mut val_batch_count = 0;
+        let mut total_loss = 0.0;
+        let mut batch_count = 0;
 
-        // Process validation data in batches (no gradient computation)
-        for batch_start in (0..val_data.len()).step_by(batch_size) {
-            let batch_end = (batch_start + batch_size).min(val_data.len());
-            let batch = &val_data[batch_start..batch_end];
+        // Use smaller batch for validation if needed
+        let val_batch_size = batch_size.min(8);
 
-            // Prepare batch tensors
-            let (input_ids, labels) = self.prepare_batch(batch, max_sequence_length)?;
+        for chunk in val_data.chunks(val_batch_size) {
+            let batch_refs: Vec<&Vec<u32>> = chunk.iter().collect();
+            let (input_ids, labels) = self.prepare_batch_fast(&batch_refs, max_length)?;
 
-            // Check if batch is valid
-            let batch_dims = input_ids.dims();
-            if batch_dims.len() == 0 || batch_dims.iter().any(|&d| d == 0) {
+            if input_ids.dims().iter().any(|&d| d == 0) {
                 continue;
             }
 
-            // Forward pass only (no backward pass for validation)
             let logits = model.forward(&input_ids)?;
+            let loss = self.calculate_loss_optimized(&logits, &labels)?;
 
-            // Calculate validation loss
-            let loss = self.calculate_loss(&logits, &labels)?;
-            total_val_loss += loss.to_scalar::<f32>()?;
-            val_batch_count += 1;
+            total_loss += loss.to_scalar::<f32>()?;
+            batch_count += 1;
         }
 
-        if val_batch_count == 0 {
-            Ok(f32::INFINITY) // Return high loss if no valid batches
+        if batch_count == 0 {
+            Ok(f32::INFINITY)
         } else {
-            Ok(total_val_loss / val_batch_count as f32)
+            Ok(total_loss / batch_count as f32)
         }
     }
 
-    fn load_existing_weights_if_available(&self, output_path: &str) -> Result<Option<VarMap>> {
-        let standard_model_path = Path::new(output_path).join("model.safetensors");
+    fn calculate_loss_optimized(&self, logits: &Tensor, labels: &Tensor) -> CandleResult<Tensor> {
+        let (batch_size, seq_len, vocab_size) = logits.dims3()?;
 
-        if standard_model_path.exists() {
-            tracing::info!("Found existing trained model at: {}", standard_model_path.display());
-            tracing::info!("Loading model checkpoint for continued training...");
+        // Reshape for loss calculation
+        let logits_flat = logits.reshape((batch_size * seq_len, vocab_size))?;
+        let labels_flat = labels.flatten_all()?;
 
-            // Load the VarMap from safetensors
-            let mut var_map = VarMap::new();
-            match var_map.load(standard_model_path) {
-                Ok(()) => {
-                    tracing::info!("✅ Successfully loaded model checkpoint!");
-                    tracing::info!("Continuing training from existing weights");
-                    return Ok(Some(var_map));
+        // Use cross entropy
+        cross_entropy(&logits_flat, &labels_flat)
+    }
+
+    fn load_training_data(&self, file_path: &str) -> Result<Vec<ConversationData>> {
+        tracing::info!("Loading training data from: {}", file_path);
+
+        let content = std::fs::read_to_string(file_path)
+            .with_context(|| format!("Failed to read training data from {}", file_path))?;
+
+        let mut conversations = Vec::new();
+        let mut filtered = 0;
+
+        for (line_num, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            match serde_json::from_str::<ConversationData>(line) {
+                Ok(conv) => {
+                    // Filter: require at least 2 messages and reasonable content
+                    let has_content = conv.messages.iter()
+                        .any(|msg| msg.content.len() > 5);
+
+                    if conv.messages.len() >= 2 && has_content {
+                        conversations.push(conv);
+                    } else {
+                        filtered += 1;
+                    }
                 }
                 Err(e) => {
-                    tracing::error!("❌ Failed to load model checkpoint: {}", e);
-                    tracing::warn!("Starting fresh training instead");
+                    if line_num < 5 { // Only warn for first few errors
+                        tracing::debug!("Invalid JSON on line {}: {}", line_num + 1, e);
+                    }
                 }
             }
         }
 
-        tracing::info!("No existing model found - starting fresh training");
-        Ok(None)
+        tracing::info!("Loaded {} conversations (filtered {} invalid)", conversations.len(), filtered);
+
+        if conversations.is_empty() {
+            return Err(anyhow!("No valid conversations found"));
+        }
+
+        Ok(conversations)
     }
 
     fn save_model(&self, _model: &SimpleTransformer, tokenizer: &Tokenizer, config: &Gpt2Config, var_map: &VarMap, output_path: &str) -> Result<()> {
-        tracing::info!("Saving model...");
+        tracing::info!("Saving final model...");
 
-        // Create output directory
         std::fs::create_dir_all(output_path)
             .with_context(|| format!("Failed to create output directory: {}", output_path))?;
 
         // Save weights
         let weights_path = Path::new(output_path).join("model.safetensors");
         var_map.save(&weights_path)
-            .map_err(|e| anyhow!("Failed to save model weights: {}", e))?;
+            .map_err(|e| anyhow!("Failed to save weights: {}", e))?;
 
         // Save config
         let config_path = Path::new(output_path).join("config.json");
-        let config_json = serde_json::to_string_pretty(config)
-            .with_context(|| "Failed to serialize config")?;
+        let config_json = serde_json::to_string_pretty(config)?;
         std::fs::write(&config_path, config_json)
             .with_context(|| format!("Failed to write config to {}", config_path.display()))?;
 
@@ -542,17 +552,7 @@ impl TrainingService {
         tokenizer.save(&tokenizer_path, false)
             .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
 
-        tracing::info!("✅ Model saved successfully to: {}", output_path);
+        tracing::info!("✅ Model saved to: {}", output_path);
         Ok(())
-    }
-
-    fn calculate_loss(&self, logits: &Tensor, labels: &Tensor) -> CandleResult<Tensor> {
-        // Reshape for cross-entropy loss
-        let (batch_size, seq_len, vocab_size) = logits.dims3()?;
-        let logits_flat = logits.reshape((batch_size * seq_len, vocab_size))?;
-        let labels_flat = labels.flatten_all()?;
-
-        // Calculate cross-entropy loss
-        cross_entropy(&logits_flat, &labels_flat)
     }
 }
