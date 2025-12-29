@@ -264,7 +264,9 @@ impl InferenceService {
 
         // Sample using multinomial distribution (simplified)
         // For now, we'll use a simple random sampling based on probabilities
-        let probs_vec = probabilities.to_vec1::<f32>()?;
+        // Squeeze to convert from [1, vocab_size] to [vocab_size]
+        let probabilities_1d = probabilities.squeeze(0)?;
+        let probs_vec = probabilities_1d.to_vec1::<f32>()?;
 
         let mut rng = rand::thread_rng();
         let random_value: f32 = rand::Rng::gen(&mut rng);
