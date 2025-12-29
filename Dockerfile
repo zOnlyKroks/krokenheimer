@@ -46,11 +46,13 @@ RUN rustc --version && cargo --version
 RUN python3 -m venv /opt/chromadb-venv && \
     /opt/chromadb-venv/bin/pip install --no-cache-dir chromadb
 
-# ChromaDB runner
+# ChromaDB runner - create script where supervisor expects it
 RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import successful')" && \
-    echo '#!/bin/bash' > /usr/local/bin/run-chromadb && \
-    echo 'exec /opt/chromadb-venv/bin/chroma run --host 0.0.0.0 --port 8000 --path "$1"' >> /usr/local/bin/run-chromadb && \
-    chmod +x /usr/local/bin/run-chromadb
+    mkdir -p /app && \
+    echo '#!/bin/bash' > /app/chromadb-runner.sh && \
+    echo 'exec /opt/chromadb-venv/bin/chroma run --host 0.0.0.0 --port 8000 --path /app/chroma_data' >> /app/chromadb-runner.sh && \
+    chmod +x /app/chromadb-runner.sh && \
+    cp /app/chromadb-runner.sh /usr/local/bin/run-chromadb
 
 # Create /app directory
 RUN mkdir -p /app
