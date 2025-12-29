@@ -415,21 +415,22 @@ impl TrainingService {
                 continue;
             }
 
-            // Input: all except last token
-            let input_len = (seq_len - 1).min(max_length);
-            for &token in &sequence[..input_len] {
+            // Both inputs and labels should have the same length
+            let actual_len = (seq_len - 1).min(max_length);
+
+            // Input: indices 0..actual_len (all except last token)
+            for &token in &sequence[..actual_len] {
                 inputs.push(token);
             }
-            for _ in input_len..max_length {
+            for _ in actual_len..max_length {
                 inputs.push(0); // Pad
             }
 
-            // Labels: all except first token
-            let label_len = seq_len - 1;
-            for &token in &sequence[1..=seq_len.min(max_length)] {
+            // Labels: indices 1..1+actual_len (all except first token)
+            for &token in &sequence[1..1+actual_len] {
                 labels.push(token);
             }
-            for _ in label_len..max_length {
+            for _ in actual_len..max_length {
                 labels.push(0); // Pad
             }
         }
