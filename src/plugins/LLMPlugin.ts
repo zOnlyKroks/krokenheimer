@@ -870,8 +870,8 @@ ${channelList}
               await vectorStoreService.storeMessage(msg);
               embeddedCount++;
 
-              // Progress update every 1000 messages
-              if (embeddedCount % 1000 === 0) {
+              // Progress update every 100 messages
+              if (embeddedCount % 100 === 0) {
                   console.log(`     Progress: ${embeddedCount}/${totalMessages} embedded...`);
               }
           }
