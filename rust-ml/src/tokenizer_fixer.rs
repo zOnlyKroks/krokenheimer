@@ -29,6 +29,25 @@ pub fn fix_tokenizer_format(tokenizer_path: &str) -> Result<()> {
         }
     }
 
+    // Fix added_tokens section - ensure each token has add_prefix_space field
+    if let Some(added_tokens) = tokenizer.get_mut("added_tokens") {
+        if let Value::Array(tokens_array) = added_tokens {
+            let mut fixed_tokens = false;
+            for token in tokens_array {
+                if let Value::Object(token_obj) = token {
+                    // Add add_prefix_space field if it doesn't exist
+                    if !token_obj.contains_key("add_prefix_space") {
+                        token_obj.insert("add_prefix_space".to_string(), Value::Bool(false));
+                        fixed_tokens = true;
+                    }
+                }
+            }
+            if fixed_tokens {
+                tracing::info!("Fixed added_tokens section in tokenizer at {}", tokenizer_path);
+            }
+        }
+    }
+
     // Write the fixed tokenizer back
     let fixed_content = serde_json::to_string_pretty(&tokenizer)?;
     fs::write(path, fixed_content)?;
