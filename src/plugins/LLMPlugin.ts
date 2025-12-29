@@ -835,7 +835,46 @@ ${channelList}
   private async clearVectorStore(message: Message, args: string[]): Promise<void> {
     await message.reply('🗑️ Clearing vector store and rebuilding with new embeddings...');
 
+    try {
       await vectorStoreService.clear();
+        await message.reply(`✅ Vector store rebuilt with TF-IDF embeddings!\n`);
+    } catch (error) {
+      console.error('Failed to clear vector store:', error);
+      await message.reply('❌ Failed to clear vector store. Check console for details.');
+    }
+  }
+
+  private async embedVectorStore(message: Message, args: string[]) : Promise<void> {
+      const totalMessages = messageStorageService.getTotalMessageCount();
+
+      // Get all active channels and re-embed their messages
+      const channels = messageStorageService.getActiveChannels();
+      let embeddedCount = 0;
+
+      for (const channel of channels) {
+          // Skip excluded channels
+          if (trainingConfig.isChannelExcluded(channel.channelId)) {
+              console.log(`  ⏭️  Skipping excluded channel #${channel.channelName}...`);
+              continue;
+          }
+
+          const messages = messageStorageService.getMessagesByChannel(channel.channelId, 100000);
+          console.log(`  📝 Re-embedding ${messages.length} messages from #${channel.channelName}...`);
+
+          for (const msg of messages) {
+              await vectorStoreService.storeMessage(msg);
+              embeddedCount++;
+
+              // Progress update every 1000 messages
+              if (embeddedCount % 1000 === 0) {
+                  console.log(`     Progress: ${embeddedCount}/${totalMessages} embedded...`);
+              }
+          }
+      }
+
+      const vectorCount = await vectorStoreService.getCollectionCount();
+      console.log(`✅ Re-embedding complete! ${embeddedCount} messages processed, ${vectorCount} stored in vector DB.`);
+      await message.reply(`✅ Vector store rebuilt with TF-IDF embeddings!\n📊 Stored ${vectorCount} message embeddings (${embeddedCount} processed).`);
   }
 
   private async manageExclusions(message: Message, args: string[]): Promise<void> {
