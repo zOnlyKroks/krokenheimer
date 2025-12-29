@@ -29,6 +29,10 @@ impl TrainingService {
         let device = Device::Cpu; // Can be extended for GPU support
         tracing::info!("Training service initialized with device: {:?}", device);
 
+        // Enable CPU optimizations
+        std::env::set_var("RAYON_NUM_THREADS", num_cpus::get().to_string());
+        tracing::info!("Utilizing {} CPU threads for parallel processing", num_cpus::get());
+
         Self { device }
     }
 
@@ -179,10 +183,10 @@ impl TrainingService {
         Gpt2Config {
             vocab_size,
             n_positions: 1024,
-            n_embd: 768,
-            n_layer: 12,
-            n_head: 12,
-            n_inner: Some(3072),
+            n_embd: 1024,  // Increased embedding size
+            n_layer: 16,   // More layers for better learning
+            n_head: 16,    // More attention heads
+            n_inner: Some(4096),  // Larger MLP hidden size
             activation_function: Activation::Gelu,
             resid_pdrop: 0.1,
             embd_pdrop: 0.1,
@@ -206,8 +210,8 @@ impl TrainingService {
     ) -> Result<()> {
         tracing::info!("Starting model training...");
 
-        let batch_size = 4;  // Small batch size for CPU training
-        let max_sequence_length = 512;  // Limit sequence length for memory
+        let batch_size = 32;  // Increased batch size to utilize more RAM
+        let max_sequence_length = 1024;  // Full context window for better training
 
         // Create optimizer with current API
         let mut optimizer = AdamW::new(
@@ -221,10 +225,15 @@ impl TrainingService {
             }
         )?;
 
+        let total_batches = (tokenized_data.len() + batch_size - 1) / batch_size;
+        tracing::info!("Training configuration: batch_size={}, sequence_length={}, total_batches={}",
+                      batch_size, max_sequence_length, total_batches);
+
         for epoch in 1..=epochs {
-            tracing::info!("Epoch {}/{}", epoch, epochs);
+            tracing::info!("Epoch {}/{} - Processing {} batches", epoch, epochs, total_batches);
             let mut total_loss = 0.0;
             let mut batch_count = 0;
+            let epoch_start = std::time::Instant::now();
 
             // Process data in batches
             for batch_start in (0..tokenized_data.len()).step_by(batch_size) {
@@ -253,12 +262,24 @@ impl TrainingService {
                 optimizer.step(&grads)?;
 
                 if batch_count % 10 == 0 {
-                    tracing::info!("Batch {}: loss = {:.4}", batch_count, loss.to_scalar::<f32>()?);
+                    let elapsed = epoch_start.elapsed();
+                    let batches_per_sec = batch_count as f64 / elapsed.as_secs_f64();
+                    let progress = batch_count as f64 / total_batches as f64 * 100.0;
+                    tracing::info!("Batch {}/{} ({:.1}%): loss={:.4}, {:.2} batches/sec",
+                                  batch_count, total_batches, progress, loss.to_scalar::<f32>()?, batches_per_sec);
                 }
             }
 
+            let epoch_duration = epoch_start.elapsed();
             let avg_loss = total_loss / batch_count as f32;
-            tracing::info!("Epoch {} completed. Average loss: {:.4}", epoch, avg_loss);
+            let batches_per_sec = batch_count as f64 / epoch_duration.as_secs_f64();
+
+            let remaining_epochs = epochs - epoch;
+            let estimated_remaining = epoch_duration * remaining_epochs;
+
+            tracing::info!("Epoch {} completed in {:.1}s. Loss: {:.4}, Speed: {:.1} batches/sec, ETA: {:.1}min",
+                          epoch, epoch_duration.as_secs_f64(), avg_loss, batches_per_sec,
+                          estimated_remaining.as_secs_f64() / 60.0);
         }
 
         Ok(())
