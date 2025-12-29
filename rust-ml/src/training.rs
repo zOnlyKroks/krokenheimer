@@ -124,15 +124,15 @@ impl TrainingService {
             char_set.insert(c);
         }
 
-        // Add characters from conversations (parallel processing)
-        conversations.iter()
-            .flat_map(|conv| conv.messages.iter())
-            .flat_map(|msg| {
-                format!("{}: {}", msg.role, msg.content).chars()
-            })
-            .for_each(|c| {
-                char_set.insert(c);
-            });
+        // Add characters from conversations
+        for conv in conversations {
+            for msg in &conv.messages {
+                let formatted = format!("{}: {}", msg.role, msg.content);
+                for c in formatted.chars() {
+                    char_set.insert(c);
+                }
+            }
+        }
 
         // Convert to sorted vector
         let mut sorted_chars: Vec<char> = char_set.into_iter().collect();
