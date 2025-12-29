@@ -11,7 +11,7 @@ import { createRequire } from 'module';
 export class RustMLService {
   private rustModule: any = null;
   private isInitialized = false;
-  private modelPath = './data/models/krokenheimer-rust';
+  private modelPath = './data/models/krokenheimer';
   private fallbackResponses = [
     "👍",
     "I see!",
