@@ -334,32 +334,9 @@ impl TrainingService {
                 total_loss += loss_value;
                 processed_batches += 1;
 
-                // Backward pass with gradient clipping for stability
+                // Backward pass
                 let grads = loss.backward()?;
-
-                // Simple gradient clipping by scaling if norm is too large
-                let mut clipped_grads = std::collections::HashMap::new();
-                let max_grad_norm = 1.0;
-                let mut total_norm_sq = 0.0;
-
-                for (name, grad) in &grads {
-                    if let Ok(grad_norm) = grad.sqr()?.sum_all()?.to_scalar::<f32>() {
-                        total_norm_sq += grad_norm;
-                    }
-                    clipped_grads.insert(name.clone(), grad.clone());
-                }
-
-                let total_norm = total_norm_sq.sqrt();
-                if total_norm > max_grad_norm {
-                    let clip_coeff = max_grad_norm / total_norm;
-                    for (name, grad) in &mut clipped_grads {
-                        if let Ok(clipped) = grad.mul(clip_coeff as f64) {
-                            *grad = clipped;
-                        }
-                    }
-                }
-
-                optimizer.step(&clipped_grads)?;
+                optimizer.step(&grads)?;
 
                 // Log progress every 5% of batches (more frequent for monitoring)
                 if processed_batches % (total_batches.max(1) / 20).max(1) == 0 {

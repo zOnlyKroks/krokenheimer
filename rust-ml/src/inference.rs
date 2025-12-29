@@ -179,13 +179,15 @@ impl InferenceService {
     }
 
     pub fn generate(&self, prompt: &str, max_length: usize, temperature: f32) -> Result<String> {
-        tracing::debug!("Generating text for prompt: {} chars", prompt.len());
+        tracing::info!("Generating text for prompt: '{}' (max_length: {}, temp: {})", prompt, max_length, temperature);
 
         // Tokenize input
         let encoding = self.tokenizer.encode(prompt, false)
             .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
 
         let input_ids = encoding.get_ids();
+        tracing::info!("Tokenized input: {:?}", input_ids);
+
         if input_ids.is_empty() {
             return Err(anyhow!("Empty input after tokenization"));
         }
@@ -235,6 +237,7 @@ impl InferenceService {
             }
 
             generated_tokens.push(next_token);
+            tracing::debug!("Generated token {}: {}", generated_tokens.len(), next_token);
 
             // Update current tokens
             let next_token_tensor = Tensor::new(&[next_token], &self.device)?
@@ -249,12 +252,13 @@ impl InferenceService {
         }
 
         // Decode generated tokens
+        tracing::info!("Decoding {} tokens: {:?}", generated_tokens.len(), generated_tokens);
         let generated_text = self.tokenizer.decode(&generated_tokens, false)
             .map_err(|e| anyhow!("Decoding failed: {}", e))?;
 
+        tracing::info!("Raw decoded text: '{}'", generated_text);
         let cleaned_text = self.clean_response(&generated_text);
-
-        tracing::debug!("Generated {} tokens: {}", generated_tokens.len(), cleaned_text);
+        tracing::info!("Cleaned text: '{}'", cleaned_text);
 
         Ok(cleaned_text)
     }
@@ -309,15 +313,11 @@ impl InferenceService {
         cleaned = cleaned.replace("[PAD]", "");
         cleaned = cleaned.replace("[UNK]", "");
 
-        // Remove garbage Unicode and control characters
+        // Remove only actual control characters, keep most Unicode
         cleaned = cleaned.chars()
             .filter(|c| {
-                // Keep only printable ASCII, common Unicode, and German characters
-                c.is_ascii_alphanumeric() ||
-                c.is_ascii_punctuation() ||
-                c.is_ascii_whitespace() ||
-                "äöüßÄÖÜ".contains(*c) ||
-                "!@#$%^&*(){}[]<>=+-_".contains(*c)
+                // Keep most characters, only filter control chars
+                !c.is_control() || c.is_whitespace()
             })
             .collect();
 
@@ -358,5 +358,37 @@ impl InferenceService {
             self.config.n_embd,
             self.config.n_positions,
         )
+    }
+
+    // Debug function to test tokenization
+    pub fn debug_tokenization(&self, text: &str) -> Result<()> {
+        tracing::info!("=== TOKENIZATION DEBUG ===");
+        tracing::info!("Input text: '{}'", text);
+
+        let encoding = self.tokenizer.encode(text, false)
+            .map_err(|e| anyhow!("Tokenization failed: {}", e))?;
+
+        let tokens = encoding.get_ids();
+        tracing::info!("Token IDs: {:?}", tokens);
+
+        let decoded = self.tokenizer.decode(tokens, false)
+            .map_err(|e| anyhow!("Decoding failed: {}", e))?;
+        tracing::info!("Decoded back: '{}'", decoded);
+
+        let vocab = self.tokenizer.get_vocab(false);
+        tracing::info!("Vocab size: {}", vocab.len());
+
+        // Show first few vocab entries
+        let mut vocab_items: Vec<(String, u32)> = vocab.iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        vocab_items.sort_by_key(|(_, v)| *v);
+
+        tracing::info!("First 20 vocab tokens:");
+        for (token, id) in vocab_items.iter().take(20) {
+            tracing::info!("  {}: '{}'", id, token);
+        }
+
+        Ok(())
     }
 }
