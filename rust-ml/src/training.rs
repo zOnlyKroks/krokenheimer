@@ -39,7 +39,7 @@ impl TrainingService {
             .unwrap_or_else(|_| "1".to_string()));
 
         // Enable CPU optimizations
-        #[cfg(feature = "accelerate")]
+        #[cfg(feature = "cpu")]
         {
             std::env::set_var("ACCELERATE_USE_ACCELERATE", "1");
             std::env::set_var("ACCELERATE_DISABLE_AVX2", "0");
@@ -334,7 +334,6 @@ impl TrainingService {
                 processed_batches += 1;
 
                 // Backward pass
-                optimizer.zero_grad();
                 let grads = loss.backward()?;
                 optimizer.step(&grads)?;
 
