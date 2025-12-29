@@ -723,11 +723,6 @@ ${channelList}
         statusText += `• Last training: ${lastTrainDate}\n`;
       }
 
-      statusText += `\n**🦀 Local Rust ML System:**\n`;
-      statusText += `• Method: Local training (no API)\n`;
-      statusText += `• Min Messages: 1000\n`;
-      statusText += `• Processing: CPU-based\n`;
-
       // If training is in progress, show detailed progress
       if (status.isTraining) {
         const progressBar = this.createProgressBar(
