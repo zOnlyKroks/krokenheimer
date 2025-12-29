@@ -123,7 +123,7 @@ impl BPETokenizerWrapper {
             "normalizer": null,
             "pre_tokenizer": {
                 "type": "ByteLevel",
-                "add_prefix_space": true,
+                "add_prefix_space": false,
                 "trim_offsets": true,
                 "use_regex": true
             },

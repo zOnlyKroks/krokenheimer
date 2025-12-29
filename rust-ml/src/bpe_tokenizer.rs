@@ -352,27 +352,22 @@ impl BPETokenizer {
 
     /// Decode token IDs back to text
     pub fn decode(&self, token_ids: &[u32]) -> String {
-        let mut result = String::new();
+        let mut tokens = Vec::new();
 
         for &token_id in token_ids {
             if let Some(token) = self.id_to_token.get(&token_id) {
-                result.push_str(token);
+                tokens.push(token);
             }
         }
 
-        // Remove end-of-word markers and clean up
+        // Join tokens and clean up BPE artifacts
+        let mut result = tokens.join("");
+
+        // Replace </w> with space to separate words
         result = result.replace("</w>", " ");
 
-        // Clean up byte representations
-        for byte_val in 0..=255u8 {
-            if !byte_val.is_ascii_graphic() && byte_val != b' ' {
-                let byte_repr = format!("<0x{:02X}>", byte_val);
-                let actual_byte = vec![byte_val];
-                if let Ok(byte_str) = String::from_utf8(actual_byte) {
-                    result = result.replace(&byte_repr, &byte_str);
-                }
-            }
-        }
+        // Clean up multiple spaces and trim
+        result = result.replace("  ", " ");
 
         result.trim().to_string()
     }

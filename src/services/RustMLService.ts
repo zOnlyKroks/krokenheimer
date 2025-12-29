@@ -238,11 +238,37 @@ export class RustMLService {
         if (currentMsg.authorName === nextMsg.authorName) continue;
         if (currentMsg.authorName === 'Krokenheimer') continue;
 
+        // Filter out garbage from Discord messages
+        const cleanContent = (text: string): string => {
+          return text
+            // Remove URLs (http/https links)
+            .replace(/https?:\/\/\S+/g, '')
+            // Remove Discord attachment URLs
+            .replace(/https:\/\/(?:cdn|media)\.discord(?:app)?\.(?:com|net)\/[^\s]+/g, '')
+            // Remove user mentions
+            .replace(/<@!?\d+>/g, '')
+            // Remove channel mentions
+            .replace(/<#\d+>/g, '')
+            // Remove role mentions
+            .replace(/<@&\d+>/g, '')
+            // Remove custom emojis
+            .replace(/<a?:\w+:\d+>/g, '')
+            // Clean up whitespace
+            .replace(/\s+/g, ' ')
+            .trim();
+        };
+
+        const userContent = cleanContent(currentMsg.content);
+        const botContent = nextMsg.authorName === 'Krokenheimer' ? cleanContent(nextMsg.content) : '👍';
+
+        // Skip if content is empty after cleaning
+        if (!userContent || userContent.length < 3) continue;
+
         // Create training conversation
-          trainingData.push({
+        trainingData.push({
           messages: [
-            { role: 'user', content: currentMsg.content },
-            { role: 'assistant', content: nextMsg.authorName === 'Krokenheimer' ? nextMsg.content : '👍' }
+            { role: 'user', content: userContent },
+            { role: 'assistant', content: botContent }
           ]
         });
       }
