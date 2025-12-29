@@ -1,8 +1,6 @@
 use candle_core::{Device, Tensor, Result as CandleResult};
 use candle_nn::{VarBuilder, VarMap, Optimizer, AdamW, loss::cross_entropy, Activation};
-use tokenizers::{Tokenizer, pre_tokenizers::byte_level::ByteLevel,
-                 decoders::byte_level::ByteLevel as ByteLevelDecoder,
-                 processors::byte_level::ByteLevel as ByteLevelProcessor};
+use tokenizers::Tokenizer;
 use anyhow::{Result, Context, anyhow};
 use std::path::Path;
 use serde_json;
@@ -184,8 +182,6 @@ impl TrainingService {
         // Only keep conversations with at least 2 quality messages
         if filtered_messages.len() >= 2 {
             Some(ConversationData {
-                channel: conv.channel,
-                timestamp: conv.timestamp,
                 messages: filtered_messages,
             })
         } else {
@@ -194,67 +190,72 @@ impl TrainingService {
     }
 
     fn create_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
-        tracing::info!("Creating BPE tokenizer for improved quality...");
+        tracing::info!("Creating improved word-level tokenizer...");
 
-        // Use proper BPE tokenization instead of character-level for much better performance
-        // Start with a basic BPE model and train it on our data
+        // Collect all unique words and subwords for better tokenization than character-level
+        let mut word_counts = std::collections::HashMap::new();
 
-        // Collect all text for BPE training
-        let mut all_text = Vec::new();
         for conv in conversations {
             for message in &conv.messages {
-                // Add conversation structure for better context understanding
-                let formatted_message = format!("{}: {}", message.role, message.content);
-                all_text.push(formatted_message);
+                let text = format!("{}: {}", message.role, message.content);
+
+                // Split on whitespace and punctuation to get word-like tokens
+                for word in text.split_whitespace() {
+                    // Further split on common punctuation
+                    let subwords: Vec<&str> = word.split(|c: char| c.is_ascii_punctuation()).collect();
+                    for subword in subwords {
+                        if !subword.is_empty() {
+                            *word_counts.entry(subword.to_lowercase()).or_insert(0) += 1;
+                        }
+                    }
+
+                    // Also include punctuation as separate tokens
+                    for ch in word.chars() {
+                        if ch.is_ascii_punctuation() {
+                            *word_counts.entry(ch.to_string()).or_insert(0) += 1;
+                        }
+                    }
+                }
             }
         }
 
-        let corpus = all_text.join("\n");
-        tracing::info!("Training BPE on {} characters of text", corpus.len());
+        // Build vocabulary with frequent words/subwords (much better than character-level)
+        let mut vocab = std::collections::HashMap::new();
+        vocab.insert("[PAD]".to_string(), 0u32);
+        vocab.insert("[UNK]".to_string(), 1u32);
+        vocab.insert("[SEP]".to_string(), 2u32);
+        vocab.insert("<|endoftext|>".to_string(), 3u32);
+        vocab.insert("<|user|>".to_string(), 4u32);
+        vocab.insert("<|assistant|>".to_string(), 5u32);
+        vocab.insert("<|system|>".to_string(), 6u32);
 
-        // Create BPE trainer with reasonable vocabulary size
-        let mut trainer = tokenizers::models::bpe::BpeTrainer::new()
-            .vocab_size(8000)  // Much more efficient than character-level
-            .min_frequency(2)  // Require at least 2 occurrences
-            .special_tokens(vec![
-                "[PAD]".to_string(),
-                "[UNK]".to_string(),
-                "[SEP]".to_string(),
-                "<|endoftext|>".to_string(),
-                "<|user|>".to_string(),
-                "<|assistant|>".to_string(),
-                "<|system|>".to_string(),
-            ]);
+        let mut id = 7u32;
 
-        // Create empty BPE model
-        let model = tokenizers::models::bpe::Bpe::default();
+        // Add most frequent words first (frequency-based vocabulary)
+        let mut sorted_words: Vec<_> = word_counts.into_iter().collect();
+        sorted_words.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by frequency (descending)
+
+        for (word, count) in sorted_words {
+            if count >= 2 && vocab.len() < 8000 { // Only include words that appear at least twice
+                vocab.insert(word, id);
+                id += 1;
+            }
+        }
+
+        tracing::info!("Built vocabulary with {} tokens (much better than character-level)", vocab.len());
+
+        // Create WordPiece model with the vocabulary
+        let model = tokenizers::models::wordpiece::WordPiece::builder()
+            .vocab(vocab.clone().into_iter().collect::<ahash::AHashMap<String, u32>>())
+            .unk_token("[UNK]".to_string())
+            .build()
+            .map_err(|e| anyhow!("Failed to build WordPiece tokenizer: {}", e))?;
+
         let mut tokenizer = Tokenizer::new(model);
 
-        // Set up pre-tokenization to split on whitespace and punctuation
+        // Set up whitespace pre-tokenization for better word separation
         use tokenizers::pre_tokenizers::whitespace::Whitespace;
         tokenizer.with_pre_tokenizer(Some(Whitespace {}));
-
-        // Train the tokenizer on our corpus
-        let corpus_iter = std::iter::once(corpus.as_str());
-        tokenizer.train_from_iterator(&mut trainer, corpus_iter)
-            .map_err(|e| anyhow!("Failed to train BPE tokenizer: {}", e))?;
-
-        // Set up proper decoding
-        use tokenizers::decoders::bpe::BPEDecoder;
-        tokenizer.with_decoder(Some(BPEDecoder::new()));
-
-        // Add special tokens for conversation structure
-        let special_tokens: Vec<tokenizers::AddedToken> = vec![
-            "[PAD]".into(),
-            "[UNK]".into(),
-            "[SEP]".into(),
-            "<|endoftext|>".into(),
-            "<|user|>".into(),
-            "<|assistant|>".into(),
-            "<|system|>".into(),
-        ];
-
-        tokenizer.add_special_tokens(&special_tokens);
 
         // Save tokenizer
         let tokenizer_path = Path::new(output_path).join("tokenizer.json");
@@ -265,7 +266,7 @@ impl TrainingService {
             .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
 
         let vocab_size = tokenizer.get_vocab_size(true);
-        tracing::info!("✅ BPE tokenizer created with vocab size: {}", vocab_size);
+        tracing::info!("✅ WordPiece tokenizer created with vocab size: {}", vocab_size);
         tracing::info!("Tokenizer saved to: {}", tokenizer_path.display());
 
         // Test tokenization quality
