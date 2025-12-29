@@ -210,9 +210,9 @@ impl TrainingService {
             n_head: 12,         // Reduced from 16 attention heads
             n_inner: Some(3072), // Reduced from 4096 (4x embedding)
             activation_function: Activation::Gelu,
-            resid_pdrop: 0.02,  // Very low dropout for aggressive training
-            embd_pdrop: 0.02,
-            attn_pdrop: 0.02,
+            resid_pdrop: 0.1,   // Standard dropout for stable training
+            embd_pdrop: 0.1,
+            attn_pdrop: 0.1,
             layer_norm_epsilon: 1e-5,
             initializer_range: 0.02,
             scale_attn_weights: true,
@@ -232,18 +232,18 @@ impl TrainingService {
     ) -> Result<()> {
         tracing::info!("Starting model training...");
 
-        let batch_size = 32;  // Larger batch size for more aggressive training
+        let batch_size = 16;  // Safe batch size to prevent memory issues
         let max_sequence_length = 1024;  // Longer sequences for better context understanding
 
         // Create optimizer with current API
         let mut optimizer = AdamW::new(
             var_map.all_vars(),
             candle_nn::ParamsAdamW {
-                lr: 2e-3,  // Much higher learning rate for aggressive training
-                beta1: 0.95,  // Higher momentum for faster convergence
-                beta2: 0.99,  // Lower second moment decay for more aggressive updates
+                lr: 5e-5,  // Conservative learning rate to prevent divergence
+                beta1: 0.9,   // Standard momentum parameter
+                beta2: 0.999, // Standard second moment decay
                 eps: 1e-8,
-                weight_decay: 0.005,  // Lower weight decay for less regularization
+                weight_decay: 0.01, // Standard weight decay for stability
             }
         )?;
 

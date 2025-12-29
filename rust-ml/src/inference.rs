@@ -276,12 +276,25 @@ impl InferenceService {
         for (i, prob) in probs_vec.iter().enumerate() {
             cumulative += prob;
             if random_value <= cumulative {
-                return Ok(i as u32);
+                let token_id = i as u32;
+                // Bounds check to prevent garbage token generation
+                let vocab = self.tokenizer.get_vocab(false);
+                if token_id < vocab.len() as u32 {
+                    return Ok(token_id);
+                }
             }
         }
 
-        // Fallback to last token
-        Ok((probs_vec.len() - 1) as u32)
+        // Safe fallback - return a common token (space or period)
+        let vocab = self.tokenizer.get_vocab(false);
+        if let Some(&space_token) = vocab.get(" ") {
+            Ok(space_token)
+        } else if let Some(&period_token) = vocab.get(".") {
+            Ok(period_token)
+        } else {
+            // Absolute fallback to first token
+            Ok(0)
+        }
     }
 
     fn clean_response(&self, text: &str) -> String {
@@ -293,6 +306,20 @@ impl InferenceService {
         cleaned = cleaned.replace("<|system|>", "");
         cleaned = cleaned.replace("<|user|>", "");
         cleaned = cleaned.replace("<|pad|>", "");
+        cleaned = cleaned.replace("[PAD]", "");
+        cleaned = cleaned.replace("[UNK]", "");
+
+        // Remove garbage Unicode and control characters
+        cleaned = cleaned.chars()
+            .filter(|c| {
+                // Keep only printable ASCII, common Unicode, and German characters
+                c.is_ascii_alphanumeric() ||
+                c.is_ascii_punctuation() ||
+                c.is_ascii_whitespace() ||
+                "äöüßÄÖÜ".contains(*c) ||
+                "!@#$%^&*(){}[]<>=+-_".contains(*c)
+            })
+            .collect();
 
         // Remove bot name prefix
         if cleaned.to_lowercase().starts_with("krokenheimer:") {

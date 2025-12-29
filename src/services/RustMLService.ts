@@ -173,7 +173,7 @@ export class RustMLService {
     try {
       // Prepare training data from stored messages
       const trainingDataPath = await this.prepareTrainingData();
-      const success = await this.trainModel(trainingDataPath, 20);
+      const success = await this.trainModel(trainingDataPath, 5);
 
       if (success) {
         return { success: true };
