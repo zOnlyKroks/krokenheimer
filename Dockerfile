@@ -68,21 +68,41 @@ COPY rust-ml/ ./rust-ml/
 # Build Rust ML module FIRST (before TypeScript)
 WORKDIR /app/rust-ml
 RUN echo "🦀 Building Rust ML module with Neon..." && \
-    npm run build && \
-    echo "✅ Rust ML module build completed" && \
+    echo "🔧 Node.js version: $(node --version)" && \
+    echo "🔧 NPM version: $(npm --version)" && \
+    echo "🔧 Setting up neon build environment..." && \
+    export npm_config_target=$(node -p "process.version") && \
+    export npm_config_target_platform=linux && \
+    export npm_config_target_arch=x64 && \
+    export npm_config_disturl=https://nodejs.org/dist && \
+    export npm_config_cache=/tmp/.npm && \
+    export npm_config_build_from_source=true && \
+    npm install && \
+    echo "🚀 Running neon build..." && \
+    npx @neon-rs/cli build --release && \
+    echo "✅ Neon build completed" && \
     echo "🔍 Checking for compiled native module..." && \
     ls -la target/release/ && \
-    find . -name "*.node" -o -name "*krokenheimer*.so" -o -name "*krokenheimer*.dll" -o -name "*krokenheimer*.dylib" && \
-    echo "🔗 Copying native module to expected location..." && \
-    # Find and copy the native module to the expected location
-    NATIVE_MODULE=$(find target/release -name "*.node" -o -name "*krokenheimer*.so" -o -name "*krokenheimer*.dll" -o -name "*krokenheimer*.dylib" | head -1) && \
-    if [ -n "$NATIVE_MODULE" ]; then \
+    ls -la . | grep -E "\.(node|so|dll|dylib)$" || echo "No native module files in current dir" && \
+    find . -maxdepth 2 -name "*.node" -o -name "index.node" && \
+    echo "🔗 Looking for native module to copy..." && \
+    NATIVE_MODULE=$(find target/release -name "*.node" -o -name "*.so" | grep krokenheimer | head -1) && \
+    if [ -n "$NATIVE_MODULE" ] && [ -f "$NATIVE_MODULE" ]; then \
         cp "$NATIVE_MODULE" ./index.node && \
         echo "✅ Native module copied: $NATIVE_MODULE -> ./index.node" && \
         ls -la index.node; \
     else \
-        echo "⚠️  No native module found - will run in fallback mode" && \
-        find target/release -type f -name "*krokenheimer*"; \
+        echo "⚠️  No .node file found, checking for .so to rename..." && \
+        SO_FILE=$(find target/release -name "libkrokenheimer_ml.so" | head -1) && \
+        if [ -n "$SO_FILE" ] && [ -f "$SO_FILE" ]; then \
+            cp "$SO_FILE" ./index.node && \
+            echo "✅ Copied .so as .node: $SO_FILE -> ./index.node" && \
+            ls -la index.node; \
+        else \
+            echo "⚠️  No suitable native module found - will run in fallback mode" && \
+            echo "Available files:" && \
+            find target/release -type f -name "*krokenheimer*" | head -10; \
+        fi \
     fi
 
 # Now copy the rest of the source code (TypeScript, etc.)
