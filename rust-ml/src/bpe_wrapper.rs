@@ -100,62 +100,26 @@ impl BPETokenizerWrapper {
             merges_array.push(format!("{} {}", first, second));
         }
 
+        // Generate added_tokens from all special tokens
+        let mut added_tokens = Vec::new();
+        for (token, id) in &self.tokenizer.special_tokens {
+            added_tokens.push(serde_json::json!({
+                "id": id,
+                "content": token,
+                "single_word": false,
+                "lstrip": false,
+                "rstrip": false,
+                "normalized": false,
+                "special": true,
+                "add_prefix_space": false
+            }));
+        }
+
         let tokenizer_json = serde_json::json!({
             "version": "1.0",
             "truncation": null,
             "padding": null,
-            "added_tokens": [
-                {
-                    "id": 0,
-                    "content": "<|endoftext|>",
-                    "single_word": false,
-                    "lstrip": false,
-                    "rstrip": false,
-                    "normalized": false,
-                    "special": true,
-                    "add_prefix_space": false
-                },
-                {
-                    "id": 1,
-                    "content": "<|pad|>",
-                    "single_word": false,
-                    "lstrip": false,
-                    "rstrip": false,
-                    "normalized": false,
-                    "special": true,
-                    "add_prefix_space": false
-                },
-                {
-                    "id": self.tokenizer.special_tokens.get("<|system|>").copied().unwrap_or(2),
-                    "content": "<|system|>",
-                    "single_word": false,
-                    "lstrip": false,
-                    "rstrip": false,
-                    "normalized": true,
-                    "special": true,
-                    "add_prefix_space": false
-                },
-                {
-                    "id": self.tokenizer.special_tokens.get("<|user|>").copied().unwrap_or(3),
-                    "content": "<|user|>",
-                    "single_word": false,
-                    "lstrip": false,
-                    "rstrip": false,
-                    "normalized": true,
-                    "special": true,
-                    "add_prefix_space": false
-                },
-                {
-                    "id": self.tokenizer.special_tokens.get("<|assistant|>").copied().unwrap_or(4),
-                    "content": "<|assistant|>",
-                    "single_word": false,
-                    "lstrip": false,
-                    "rstrip": false,
-                    "normalized": true,
-                    "special": true,
-                    "add_prefix_space": false
-                }
-            ],
+            "added_tokens": added_tokens,
             "normalizer": null,
             "pre_tokenizer": {
                 "type": "ByteLevel",
