@@ -170,10 +170,15 @@ impl TrainingService {
                     if word.len() > 2 {
                         unique_tokens.insert(word.to_string()); // Original case
                         unique_tokens.insert(word.to_lowercase()); // Lowercase
-                        if word.chars().next().unwrap().is_lowercase() {
-                            unique_tokens.insert(format!("{}{}",
-                                word.chars().next().unwrap().to_uppercase().to_string(),
-                                &word[1..])); // Title case
+
+                        // Create title case properly handling UTF-8
+                        let mut chars = word.chars();
+                        if let Some(first_char) = chars.next() {
+                            if first_char.is_lowercase() {
+                                let rest: String = chars.collect();
+                                unique_tokens.insert(format!("{}{}",
+                                    first_char.to_uppercase(), rest));
+                            }
                         }
                     }
                 }
