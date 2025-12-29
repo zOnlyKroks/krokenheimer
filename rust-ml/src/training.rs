@@ -169,24 +169,26 @@ impl TrainingService {
     fn create_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
         tracing::info!("Creating improved word-level tokenizer...");
 
-        // Collect all unique words and subwords for better tokenization than character-level
+        // Collect all unique words and subwords - preserve actual casing from conversations
         let mut word_counts = std::collections::HashMap::new();
 
         for conv in conversations {
             for message in &conv.messages {
                 let text = format!("{}: {}", message.role, message.content);
 
-                // Split on whitespace and punctuation to get word-like tokens
+                // Split on whitespace to get words
                 for word in text.split_whitespace() {
-                    // Further split on common punctuation
-                    let subwords: Vec<&str> = word.split(|c: char| c.is_ascii_punctuation()).collect();
-                    for subword in subwords {
-                        if !subword.is_empty() {
-                            *word_counts.entry(subword.to_lowercase()).or_insert(0) += 1;
-                        }
+                    // Clean punctuation but preserve the main word
+                    let cleaned_word = word.trim_matches(|c: char| c.is_ascii_punctuation());
+
+                    // Add the clean word (preserve original case)
+                    if !cleaned_word.is_empty() && cleaned_word.len() > 1 {
+                        *word_counts.entry(cleaned_word.to_string()).or_insert(0) += 1;
+                        // Also add lowercase version for better coverage
+                        *word_counts.entry(cleaned_word.to_lowercase()).or_insert(0) += 1;
                     }
 
-                    // Also include punctuation as separate tokens
+                    // Add punctuation as separate tokens
                     for ch in word.chars() {
                         if ch.is_ascii_punctuation() {
                             *word_counts.entry(ch.to_string()).or_insert(0) += 1;
