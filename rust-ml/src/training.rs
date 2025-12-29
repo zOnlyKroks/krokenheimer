@@ -51,11 +51,19 @@ impl TrainingService {
         // Tokenize conversations
         let tokenized_data = self.tokenize_conversations(&conversations, &tokenizer)?;
 
-        // Create model
+        // Create model - try to load existing weights for continued training
         let config = self.create_model_config(tokenizer.get_vocab_size(false));
         let var_map = VarMap::new();
         let var_builder = VarBuilder::from_varmap(&var_map, candle_core::DType::F32, &self.device);
-        let weights = std::collections::HashMap::new(); // Empty weights for new model
+
+        // Check for existing model to continue training from
+        let weights = self.load_existing_weights_if_available(output_path)?;
+        if weights.is_empty() {
+            tracing::info!("Starting training from scratch (no existing model found)");
+        } else {
+            tracing::info!("Continuing training from existing model checkpoint");
+        }
+
         let model = SimpleTransformer::load(&weights, &config, var_builder)?;
 
         // Training loop
@@ -189,9 +197,9 @@ impl TrainingService {
             n_head: 12,         // Reduced from 16 attention heads
             n_inner: Some(3072), // Reduced from 4096 (4x embedding)
             activation_function: Activation::Gelu,
-            resid_pdrop: 0.1,
-            embd_pdrop: 0.1,
-            attn_pdrop: 0.1,
+            resid_pdrop: 0.05,  // Lower dropout for better coherence
+            embd_pdrop: 0.05,
+            attn_pdrop: 0.05,
             layer_norm_epsilon: 1e-5,
             initializer_range: 0.02,
             scale_attn_weights: true,
@@ -218,7 +226,7 @@ impl TrainingService {
         let mut optimizer = AdamW::new(
             var_map.all_vars(),
             candle_nn::ParamsAdamW {
-                lr: 5e-4,
+                lr: 1e-4,  // Lower learning rate for fine-tuning
                 beta1: 0.9,
                 beta2: 0.999,
                 eps: 1e-8,
@@ -378,5 +386,20 @@ impl TrainingService {
 
         tracing::info!("Model saved successfully to: {}", output_path);
         Ok(())
+    }
+
+    /// Try to load existing model weights for continued training
+    fn load_existing_weights_if_available(&self, output_path: &str) -> Result<std::collections::HashMap<String, Tensor>> {
+        let weights_path = Path::new(output_path).join("model.safetensors");
+
+        if weights_path.exists() {
+            tracing::info!("Found existing model weights at: {:?}", weights_path);
+            // Try to load existing weights
+            // For now, return empty HashMap - full implementation would load from safetensors
+            // This is a placeholder for future implementation
+            tracing::warn!("Existing model loading not fully implemented yet - starting fresh");
+        }
+
+        Ok(std::collections::HashMap::new())
     }
 }

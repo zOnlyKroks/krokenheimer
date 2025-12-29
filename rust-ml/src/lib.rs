@@ -87,7 +87,7 @@ fn generate_mention_response(mut cx: FunctionContext) -> JsResult<JsString> {
 
     unsafe {
         if let Some(ref service) = INFERENCE_SERVICE {
-            match service.generate(&prompt, 100, 0.9) {
+            match service.generate(&prompt, 100, 0.3) {
                 Ok(result) => Ok(cx.string(result)),
                 Err(e) => {
                     tracing::error!("Mention response failed: {}", e);
@@ -166,7 +166,7 @@ fn get_model_info(mut cx: FunctionContext) -> JsResult<JsObject> {
 fn get_config(mut cx: FunctionContext) -> JsResult<JsObject> {
     let obj = cx.empty_object();
     let model = cx.string("krokenheimer-rust (candle)");
-    let temperature = cx.number(0.9);
+    let temperature = cx.number(0.3);
     let max_tokens = cx.number(100);
     let context_window = cx.number(1024);
 
