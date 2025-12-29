@@ -1,6 +1,7 @@
 import { StoredMessage } from '../types/llm.js';
 import { promises as fs } from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
 
 /**
  * Rust ML Service
@@ -38,6 +39,8 @@ export class RustMLService {
         const dirContents = await fs.readdir(rustModulePath);
         console.log('[RustML] 📂 Directory contents:', dirContents);
 
+        // Use createRequire for native modules in ES context
+        const require = createRequire(import.meta.url);
         this.rustModule = require(rustModulePath);
         console.log('[RustML] ✅ Module loaded successfully, attempting model load...');
 
