@@ -97,10 +97,11 @@ impl TransformerLayer {
 impl MultiHeadAttention {
     fn forward(&self, x: &Tensor) -> CandleResult<Tensor> {
         let qkv = self.c_attn.forward(x)?;
-        // Simplified attention - create proper scalar tensor for multiplication
-        let scale = Tensor::from_slice(&[0.333f32], &[], qkv.device())?;
-        let output = qkv.broadcast_mul(&scale)?;
-        self.c_proj.forward(&output)
+        // In real attention: split QKV, do attention computation
+        // For simplification: just take the first n_embd dimensions (Q part)
+        let (_batch_size, seq_len, _full_dim) = qkv.dims3()?;
+        let q_only = qkv.narrow(2, 0, self.n_embd)?; // Take first n_embd dimensions
+        self.c_proj.forward(&q_only)
     }
 }
 
