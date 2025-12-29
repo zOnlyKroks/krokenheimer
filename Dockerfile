@@ -1,6 +1,6 @@
 FROM node:20-bookworm
 
-# Install system dependencies including Rust
+# Install system dependencies including Rust and native module build tools
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -19,7 +19,18 @@ RUN apt-get update && apt-get install -y \
     net-tools \
     netcat-openbsd \
     build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Install node-gyp globally for native module compilation
+RUN npm install -g node-gyp
+
+# Set Python path for node-gyp (fixes common build issues)
+ENV PYTHON=/usr/bin/python3
+
+# Set Node.js native module build environment variables
+ENV npm_config_build_from_source=true
+ENV npm_config_cache=/tmp/.npm
 
 # Install Rust toolchain
 ENV RUSTUP_HOME=/usr/local/rustup \
@@ -55,10 +66,21 @@ COPY rust-ml/ ./rust-ml/
 
 # Build Rust ML module FIRST (before TypeScript)
 WORKDIR /app/rust-ml
-RUN echo "🦀 Building Rust ML module..." && \
-    cargo build --release && \
-    echo "✅ Rust ML module compiled successfully" && \
-    ls -la target/release/ | grep -E "\.(so|dylib|dll)$" || echo "⚠️  No shared library found"
+RUN echo "🦀 Setting up Neon build environment..." && \
+    npm install && \
+    echo "🦀 Building Rust ML module with Neon..." && \
+    npm run build && \
+    echo "✅ Rust ML module build completed" && \
+    echo "🔍 Checking for compiled native module..." && \
+    ls -la target/release/ && \
+    find . -name "*.node" -o -name "*krokenheimer*.so" -o -name "*krokenheimer*.dll" -o -name "*krokenheimer*.dylib" && \
+    echo "🔗 Copying native module to expected location..." && \
+    (find target/release -name "*.node" -exec cp {} ./index.node \; || \
+     find target/release -name "*krokenheimer*.so" -exec cp {} ./index.node \; || \
+     find target/release -name "*krokenheimer*.dll" -exec cp {} ./index.node \; || \
+     find target/release -name "*krokenheimer*.dylib" -exec cp {} ./index.node \; || \
+     echo "⚠️  No native module found - will run in fallback mode") && \
+    (ls -la index.node 2>/dev/null && echo "✅ Native module ready at ./index.node" || echo "⚠️  index.node not found - running in fallback mode")
 
 # Now copy the rest of the source code (TypeScript, etc.)
 WORKDIR /app

@@ -41,7 +41,10 @@ export class RustMLService {
           return true;
         }
       } catch (error) {
-        console.log('[RustML] Rust module not available, using fallback mode');
+        console.log('[RustML] ❌ Rust module not available, using fallback mode');
+        console.log('[RustML] 🔍 Module path attempted:', rustModulePath);
+        console.log('[RustML] 📋 Error details:', error instanceof Error ? error.message : String(error));
+        console.log('[RustML] 💡 This means training will not work! Build the module with: cd rust-ml && npm run build');
       }
 
       // Fallback initialization
@@ -316,7 +319,9 @@ export class RustMLService {
         console.error('[RustML] Training failed:', error);
       }
     } else {
-      console.log('[RustML] Training requested but Rust module not available');
+      console.log('[RustML] ❌ Training requested but Rust module not available');
+      console.log('[RustML] 🔍 Expected module location: ./rust-ml/index.node');
+      console.log('[RustML] 💡 To fix: 1) cd rust-ml && npm run build, 2) verify index.node exists, 3) restart bot');
     }
 
     return false;
