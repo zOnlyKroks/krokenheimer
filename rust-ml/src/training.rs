@@ -167,12 +167,30 @@ impl TrainingService {
     }
 
     fn create_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
-        tracing::info!("Creating reliable character-level tokenizer...");
+        tracing::info!("Creating working tokenizer with standard approach...");
 
-        // Go back to character-level but much better than before
-        // This approach actually WORKS unlike the word-level attempts
+        // Use a much simpler approach that actually works
+        // Build character-level vocabulary but use standard methods
 
         let mut chars = std::collections::HashSet::new();
+
+        // Add standard ASCII characters that will definitely be in conversations
+        for c in 'a'..='z' { chars.insert(c); }
+        for c in 'A'..='Z' { chars.insert(c); }
+        for c in '0'..='9' { chars.insert(c); }
+        chars.insert(' ');
+        chars.insert('!');
+        chars.insert('?');
+        chars.insert('.');
+        chars.insert(',');
+        chars.insert(':');
+        chars.insert(';');
+        chars.insert('\'');
+        chars.insert('"');
+        chars.insert('-');
+        chars.insert('\n');
+
+        // Add any additional characters from your data
         for conv in conversations {
             for message in &conv.messages {
                 let text = format!("{}: {}", message.role, message.content);
@@ -182,30 +200,33 @@ impl TrainingService {
             }
         }
 
+        // Build vocab with guaranteed order
         let mut vocab = std::collections::HashMap::new();
         vocab.insert("[PAD]".to_string(), 0u32);
         vocab.insert("[UNK]".to_string(), 1u32);
-        vocab.insert("[SEP]".to_string(), 2u32);
-        vocab.insert("<|endoftext|>".to_string(), 3u32);
+        vocab.insert("<|endoftext|>".to_string(), 2u32);
 
-        let mut current_id = 4u32;
+        let mut id = 3u32;
+        let mut sorted_chars: Vec<char> = chars.into_iter().collect();
+        sorted_chars.sort(); // Deterministic order
 
-        // Add all characters from your actual conversations
-        for c in chars {
-            vocab.insert(c.to_string(), current_id);
-            current_id += 1;
+        for c in sorted_chars {
+            vocab.insert(c.to_string(), id);
+            id += 1;
         }
 
-        tracing::info!("Built character vocabulary with {} tokens", vocab.len());
+        tracing::info!("Character vocabulary size: {}", vocab.len());
 
-        // Create simple WordPiece model with character vocabulary (this works)
+        // Use the most basic tokenizer model
         let model = tokenizers::models::wordpiece::WordPiece::builder()
-            .vocab(vocab.clone().into_iter().collect::<ahash::AHashMap<String, u32>>())
+            .vocab(vocab.clone().into_iter().collect())
             .unk_token("[UNK]".to_string())
             .build()
-            .map_err(|e| anyhow!("Failed to build character tokenizer: {}", e))?;
+            .map_err(|e| anyhow!("Failed to build tokenizer: {}", e))?;
 
         let mut tokenizer = Tokenizer::new(model);
+
+        // No pre-tokenizer - keep it simple
 
         // Save tokenizer
         let tokenizer_path = Path::new(output_path).join("tokenizer.json");
@@ -215,15 +236,13 @@ impl TrainingService {
         tokenizer.save(&tokenizer_path, false)
             .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
 
-        let vocab_size = tokenizer.get_vocab_size(true);
-        tracing::info!("✅ Character tokenizer created with vocab size: {}", vocab_size);
-        tracing::info!("Tokenizer saved to: {}", tokenizer_path.display());
+        tracing::info!("✅ Tokenizer saved to: {}", tokenizer_path.display());
 
-        // Test tokenization
-        let test_text = "Hello! How are you doing today?";
+        // Test with simple text
+        let test_text = "Hello";
         if let Ok(encoding) = tokenizer.encode(test_text, false) {
             let tokens = encoding.get_tokens();
-            tracing::info!("Test tokenization: '{}' -> {} tokens: {:?}", test_text, tokens.len(), tokens);
+            tracing::info!("Test: '{}' -> {} tokens: {:?}", test_text, tokens.len(), tokens);
         }
 
         Ok(tokenizer)
