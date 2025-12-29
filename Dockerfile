@@ -66,9 +66,7 @@ COPY rust-ml/ ./rust-ml/
 
 # Build Rust ML module FIRST (before TypeScript)
 WORKDIR /app/rust-ml
-RUN echo "🦀 Setting up Neon build environment..." && \
-    npm install && \
-    echo "🦀 Building Rust ML module with Neon..." && \
+RUN echo "🦀 Building Rust ML module with Neon..." && \
     npm run build && \
     echo "✅ Rust ML module build completed" && \
     echo "🔍 Checking for compiled native module..." && \
