@@ -60,7 +60,7 @@ impl BPETokenizerWrapper {
     }
 
     /// Convert conversations to training texts
-    fn conversations_to_texts(&self, conversations: &[crate::training::ConversationData]) -> Vec<String> {
+    pub fn conversations_to_texts(&self, conversations: &[crate::training::ConversationData]) -> Vec<String> {
         let mut texts = Vec::new();
 
         for conv in conversations {

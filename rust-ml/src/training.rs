@@ -125,34 +125,95 @@ impl TrainingService {
     }
 
     fn calculate_optimal_vocab_size(&self, conversations: &[ConversationData]) -> usize {
-        // Calculate vocabulary size based on data characteristics
+        // More sophisticated vocabulary size calculation
         let mut total_chars = 0;
-        let mut unique_words = std::collections::HashSet::new();
+        let mut unique_tokens = std::collections::HashSet::new();
+        let mut unique_chars = std::collections::HashSet::new();
+        let mut total_messages = 0;
 
         for conv in conversations {
             for message in &conv.messages {
                 total_chars += message.content.len();
-                for word in message.content.split_whitespace() {
-                    unique_words.insert(word.to_lowercase());
+                total_messages += 1;
+
+                // Collect all unique characters
+                for ch in message.content.chars() {
+                    unique_chars.insert(ch);
+                }
+
+                // Better tokenization: split on whitespace AND punctuation
+                let content = &message.content;
+                let mut current_token = String::new();
+
+                for ch in content.chars() {
+                    if ch.is_alphanumeric() || ch == '_' || ch == '@' || ch == '#' {
+                        current_token.push(ch);
+                    } else {
+                        // End of alphanumeric token
+                        if !current_token.is_empty() {
+                            unique_tokens.insert(current_token.clone());
+                            current_token.clear();
+                        }
+                        // Also add the punctuation/symbol as a token if it's significant
+                        if !ch.is_whitespace() {
+                            unique_tokens.insert(ch.to_string());
+                        }
+                    }
+                }
+                // Don't forget the last token
+                if !current_token.is_empty() {
+                    unique_tokens.insert(current_token);
+                }
+
+                // Also add case variations for common words
+                for word in content.split_whitespace() {
+                    if word.len() > 2 {
+                        unique_tokens.insert(word.to_string()); // Original case
+                        unique_tokens.insert(word.to_lowercase()); // Lowercase
+                        if word.chars().next().unwrap().is_lowercase() {
+                            unique_tokens.insert(format!("{}{}",
+                                word.chars().next().unwrap().to_uppercase().to_string(),
+                                &word[1..])); // Title case
+                        }
+                    }
                 }
             }
         }
 
-        let unique_word_count = unique_words.len();
+        let unique_token_count = unique_tokens.len();
+        let unique_char_count = unique_chars.len();
+        let avg_message_length = total_chars as f64 / total_messages.max(1) as f64;
 
-        // Base vocabulary size: start with a reasonable minimum
-        let base_size = 2000; // Covers basic characters, bytes, common subwords
+        tracing::info!("📊 Vocabulary analysis:");
+        tracing::info!("  - Unique tokens (better counting): {}", unique_token_count);
+        tracing::info!("  - Unique characters: {}", unique_char_count);
+        tracing::info!("  - Total characters: {}", total_chars);
+        tracing::info!("  - Average message length: {:.1} chars", avg_message_length);
 
-        // Scale based on unique words (but don't make it too large)
-        let word_factor = (unique_word_count as f64 * 0.5).min(8000.0) as usize;
+        // Base vocabulary: Unicode chars + byte representations
+        let base_size = 1000.max(unique_char_count * 2);
 
-        // Scale based on total character count (for subword diversity)
-        let char_factor = (total_chars as f64 / 10000.0).min(2000.0) as usize;
+        // Scale based on unique tokens (more realistic now)
+        let token_factor = (unique_token_count as f64 * 0.3).min(10000.0) as usize;
 
-        let calculated_size = base_size + word_factor + char_factor;
+        // Scale based on corpus diversity
+        let diversity_factor = if avg_message_length > 100.0 {
+            // Longer messages suggest more complex vocabulary
+            (total_chars as f64 / 8000.0).min(3000.0) as usize
+        } else {
+            // Shorter messages, more conservative
+            (total_chars as f64 / 15000.0).min(1500.0) as usize
+        };
 
-        // Clamp to reasonable bounds
-        calculated_size.max(1500).min(15000)
+        let calculated_size = base_size + token_factor + diversity_factor;
+
+        // More generous bounds for chat data
+        let final_size = calculated_size.max(3000).min(20000);
+
+        tracing::info!("  - Calculated vocab size: {} (base: {}, tokens: {}, diversity: {})",
+                      final_size, base_size, token_factor, diversity_factor);
+
+        final_size
     }
 
     fn create_wrapper_from_existing_tokenizer(&self, _tokenizer: Tokenizer) -> Result<BPETokenizerWrapper> {

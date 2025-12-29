@@ -5,6 +5,7 @@ mod training;
 mod tokenizer;
 mod bpe_tokenizer;
 mod bpe_wrapper;
+mod bpe_test;
 mod model;
 mod utils;
 
@@ -30,6 +31,9 @@ fn main(mut cx: ModuleContext) -> NeonResult<()> {
     // Utility functions
     cx.export_function("getModelInfo", get_model_info)?;
     cx.export_function("getConfig", get_config)?;
+
+    // BPE testing functions
+    cx.export_function("runBPETests", run_bpe_tests)?;
 
     Ok(())
 }
@@ -177,4 +181,18 @@ fn get_config(mut cx: FunctionContext) -> JsResult<JsObject> {
     obj.set(&mut cx, "maxTokens", max_tokens)?;
     obj.set(&mut cx, "contextWindow", context_window)?;
     Ok(obj)
+}
+
+// BPE testing function
+fn run_bpe_tests(mut cx: FunctionContext) -> JsResult<JsBoolean> {
+    match bpe_test::run_bpe_tests() {
+        Ok(()) => {
+            tracing::info!("BPE tests completed successfully");
+            Ok(cx.boolean(true))
+        }
+        Err(e) => {
+            tracing::error!("BPE tests failed: {}", e);
+            Ok(cx.boolean(false))
+        }
+    }
 }
