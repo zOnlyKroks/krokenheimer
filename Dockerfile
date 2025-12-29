@@ -54,8 +54,7 @@ RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import su
     chmod +x /app/chromadb-runner.sh && \
     cp /app/chromadb-runner.sh /usr/local/bin/run-chromadb
 
-# Create /app directory
-RUN mkdir -p /app
+# /app directory already created above
 
 WORKDIR /app
 
