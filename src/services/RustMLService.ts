@@ -30,8 +30,16 @@ export class RustMLService {
 
       // Check if compiled Rust module exists
       try {
+        console.log('[RustML] 🔍 Attempting to access module directory:', rustModulePath);
         await fs.access(rustModulePath);
+        console.log('[RustML] ✅ Module directory exists, attempting to require...');
+
+        // Check what's in the directory
+        const dirContents = await fs.readdir(rustModulePath);
+        console.log('[RustML] 📂 Directory contents:', dirContents);
+
         this.rustModule = require(rustModulePath);
+        console.log('[RustML] ✅ Module loaded successfully, attempting model load...');
 
         // Try to load the model
         const modelLoaded = this.rustModule.loadModel(this.modelPath);
@@ -39,11 +47,14 @@ export class RustMLService {
           this.isInitialized = true;
           console.log('[RustML] Successfully initialized with Rust module');
           return true;
+        } else {
+          console.log('[RustML] ⚠️ Module loaded but model failed to load from:', this.modelPath);
         }
       } catch (error) {
         console.log('[RustML] ❌ Rust module not available, using fallback mode');
         console.log('[RustML] 🔍 Module path attempted:', rustModulePath);
         console.log('[RustML] 📋 Error details:', error instanceof Error ? error.message : String(error));
+        console.log('[RustML] 🗂️ Error stack:', error instanceof Error ? error.stack : 'No stack available');
         console.log('[RustML] 💡 This means training will not work! Build the module with: cd rust-ml && npm run build');
       }
 
