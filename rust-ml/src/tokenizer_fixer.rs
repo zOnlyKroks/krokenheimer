@@ -48,6 +48,30 @@ pub fn fix_tokenizer_format(tokenizer_path: &str) -> Result<()> {
         }
     }
 
+    // Fix pre_tokenizer section - ensure it has add_prefix_space field if it's ByteLevel
+    if let Some(pre_tokenizer) = tokenizer.get_mut("pre_tokenizer") {
+        if let Value::Object(pre_tok_obj) = pre_tokenizer {
+            if pre_tok_obj.get("type") == Some(&Value::String("ByteLevel".to_string())) {
+                if !pre_tok_obj.contains_key("add_prefix_space") {
+                    pre_tok_obj.insert("add_prefix_space".to_string(), Value::Bool(false));
+                    tracing::info!("Fixed pre_tokenizer section in tokenizer at {}", tokenizer_path);
+                }
+            }
+        }
+    }
+
+    // Fix post_processor section if it exists and needs add_prefix_space
+    if let Some(post_processor) = tokenizer.get_mut("post_processor") {
+        if let Value::Object(post_proc_obj) = post_processor {
+            if post_proc_obj.get("type") == Some(&Value::String("ByteLevel".to_string())) {
+                if !post_proc_obj.contains_key("add_prefix_space") {
+                    post_proc_obj.insert("add_prefix_space".to_string(), Value::Bool(false));
+                    tracing::info!("Fixed post_processor section in tokenizer at {}", tokenizer_path);
+                }
+            }
+        }
+    }
+
     // Write the fixed tokenizer back
     let fixed_content = serde_json::to_string_pretty(&tokenizer)?;
     fs::write(path, fixed_content)?;
