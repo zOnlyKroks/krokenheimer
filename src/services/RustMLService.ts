@@ -96,31 +96,29 @@ export class RustMLService {
     }
   }
 
-  async generateMessage(context: StoredMessage[], channelName: string, channelId?: string): Promise<string> {
+  async generateMessage(context: StoredMessage[], channelName: string, channelId?: string): Promise<string | undefined> {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     if (this.rustModule) {
       return this.generateWithRust(context, channelName, channelId);
-    } else {
-      return this.generateFallback(context, channelName);
     }
   }
 
-  async generateMentionResponse(context: StoredMessage[], messageContent: string, authorName: string): Promise<string> {
+  async generateMentionResponse(context: StoredMessage[], messageContent: string, authorName: string): Promise<string | undefined> {
     if (!this.isInitialized) {
       await this.initialize();
     }
 
     if (this.rustModule) {
       return this.generateMentionWithRust(context, messageContent, authorName);
-    } else {
-      return this.generateMentionFallback(messageContent, authorName);
     }
+
+    return undefined;
   }
 
-  private async generateWithRust(context: StoredMessage[], channelName: string, channelId?: string): Promise<string> {
+  private async generateWithRust(context: StoredMessage[], channelName: string, channelId?: string): Promise<string | undefined> {
     try {
       // Build context for Rust module
       const prompt = this.buildContextPrompt(context, channelName);
@@ -135,65 +133,7 @@ export class RustMLService {
       console.error('[RustML] Generation failed:', error);
     }
 
-    return this.getRandomFallback();
-  }
-
-  private async generateMentionWithRust(context: StoredMessage[], messageContent: string, authorName: string): Promise<string> {
-    try {
-      // Use Rust module for mention responses
-      const result = this.rustModule.generateMentionResponse(context, messageContent, authorName);
-
-      if (result && result.length > 0) {
-        return result;
-      }
-    } catch (error) {
-      console.error('[RustML] Mention generation failed:', error);
-    }
-
-    return this.getRandomFallback();
-  }
-
-  private generateFallback(context: StoredMessage[], channelName: string): Promise<string> {
-    // Simple fallback logic
-    const recentMessage = context[context.length - 1];
-
-    if (recentMessage) {
-      const content = recentMessage.content.toLowerCase();
-
-      // Simple keyword-based responses
-      if (content.includes('hello') || content.includes('hi')) {
-        return Promise.resolve('Hello!');
-      }
-      if (content.includes('how are you')) {
-        return Promise.resolve('Doing well, thanks!');
-      }
-      if (content.includes('thanks') || content.includes('thank you')) {
-        return Promise.resolve('You\'re welcome!');
-      }
-      if (content.includes('good') || content.includes('great') || content.includes('awesome')) {
-        return Promise.resolve('Glad to hear that!');
-      }
-      if (content.includes('help')) {
-        return Promise.resolve('How can I assist you?');
-      }
-    }
-
-    return Promise.resolve(this.getRandomFallback());
-  }
-
-  private generateMentionFallback(messageContent: string, authorName: string): Promise<string> {
-    const responses = [
-      `Hi ${authorName}!`,
-      `What's up, ${authorName}?`,
-      `Hey there!`,
-      `Hello!`,
-      `Yes?`,
-      `How can I help?`
-    ];
-
-    const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-      // @ts-ignore
-      return Promise.resolve(randomResponse);
+    return undefined;
   }
 
   private buildContextPrompt(context: StoredMessage[], channelName: string): string {
@@ -211,35 +151,19 @@ export class RustMLService {
     return prompt;
   }
 
-  private getRandomFallback(): string {
-    // @ts-ignore
-      return this.fallbackResponses[Math.floor(Math.random() * this.fallbackResponses.length)];
-  }
+  private async generateMentionWithRust(context: StoredMessage[], messageContent: string, authorName: string): Promise<string | undefined> {
+    try {
+      // Use Rust module for mention responses
+      const result = this.rustModule.generateMentionResponse(context, messageContent, authorName);
 
-  // Training methods
-  async shouldStartTraining(messageCount: number, lastTrainCount: number, threshold: number = 1000): Promise<{shouldTrain: boolean, reason: string}> {
-    if (this.rustModule) {
-      try {
-        const result = this.rustModule.shouldStartTraining(messageCount, lastTrainCount, threshold);
-        return {
-          shouldTrain: result.shouldTrain,
-          reason: result.reason
-        };
-      } catch (error) {
-        console.error('[RustML] Training check failed:', error);
+      if (result && result.length > 0) {
+        return result;
       }
+    } catch (error) {
+      console.error('[RustML] Mention generation failed:', error);
     }
 
-    // Fallback logic
-    const newMessages = messageCount - lastTrainCount;
-    const shouldTrain = newMessages >= threshold;
-
-    return {
-      shouldTrain,
-      reason: shouldTrain
-        ? `Ready to train with ${newMessages} new messages`
-        : `Only ${newMessages} new messages (need ${threshold})`
-    };
+    return undefined;
   }
 
   async startTraining(): Promise<{success: boolean, error?: string}> {

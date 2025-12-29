@@ -676,7 +676,7 @@ export class LLMPlugin implements BotPlugin {
 ${channelList}
 
 **LLM Configuration:**
-• Model: ${fineTuningService.getCurrentModelName()}
+• Model: ${rustMLService.getConfig().model} (${await rustMLService.checkModelExists() ? '✅ active' : '❌ not found'})
 • Temperature: ${llmConfig.temperature}
 • Max tokens: ${llmConfig.maxTokens}
 • Context window: ${llmConfig.contextWindow}
@@ -714,10 +714,16 @@ ${channelList}
 
       let statusText = `**🦀 Rust ML Training Status**\n\n`;
 
-      statusText += `• Current model: ${fineTuningService.getCurrentModelName()}\n`;
+      // Get actual Rust ML model info instead of old remote training info
+      const rustModelInfo = rustMLService.getModelInfo();
+      const rustConfig = rustMLService.getConfig();
+      const modelExists = await rustMLService.checkModelExists();
+
+      statusText += `• Current model: ${rustConfig.model}${modelExists ? ' ✅' : ' ❌ (not found)'}\n`;
+      statusText += `• Model status: ${rustModelInfo.status}\n`;
       statusText += `• Total messages: ${stats.totalMessages}\n`;
       statusText += `• New messages: ${stats.newMessages}\n`;
-      statusText += `• Model version: v${stats.modelVersion}\n`;
+      statusText += `• Model version: ${rustModelInfo.version}\n`;
       statusText += `• Training active: ${status.isTraining ? '🔄 Yes (local)' : '💤 No'}\n`;
 
       if (stats.lastTrainDate) {
