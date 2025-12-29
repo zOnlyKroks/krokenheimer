@@ -189,7 +189,6 @@ export class LLMPlugin implements BotPlugin {
       const channelName = message.channel.isDMBased() ? 'DM' : (message.channel as TextChannel).name;
       console.error(`Failed to handle mention in #${channelName}:`, error);
 
-      // Provide helpful error message based on error type
       let errorMessage = 'Sorry, I encountered an error trying to respond.';
 
       if (error instanceof Error) {
