@@ -106,40 +106,54 @@ impl BPETokenizerWrapper {
             "padding": null,
             "added_tokens": [
                 {
-                    "id": self.tokenizer.special_tokens.get("<|system|>").copied().unwrap_or(0),
+                    "id": 0,
+                    "content": "<|endoftext|>",
+                    "single_word": false,
+                    "lstrip": false,
+                    "rstrip": false,
+                    "normalized": false,
+                    "special": true,
+                    "add_prefix_space": false
+                },
+                {
+                    "id": 1,
+                    "content": "<|pad|>",
+                    "single_word": false,
+                    "lstrip": false,
+                    "rstrip": false,
+                    "normalized": false,
+                    "special": true,
+                    "add_prefix_space": false
+                },
+                {
+                    "id": self.tokenizer.special_tokens.get("<|system|>").copied().unwrap_or(2),
                     "content": "<|system|>",
                     "single_word": false,
                     "lstrip": false,
                     "rstrip": false,
                     "normalized": true,
-                    "special": true
+                    "special": true,
+                    "add_prefix_space": false
                 },
                 {
-                    "id": self.tokenizer.special_tokens.get("<|user|>").copied().unwrap_or(1),
+                    "id": self.tokenizer.special_tokens.get("<|user|>").copied().unwrap_or(3),
                     "content": "<|user|>",
                     "single_word": false,
                     "lstrip": false,
                     "rstrip": false,
                     "normalized": true,
-                    "special": true
+                    "special": true,
+                    "add_prefix_space": false
                 },
                 {
-                    "id": self.tokenizer.special_tokens.get("<|assistant|>").copied().unwrap_or(2),
+                    "id": self.tokenizer.special_tokens.get("<|assistant|>").copied().unwrap_or(4),
                     "content": "<|assistant|>",
                     "single_word": false,
                     "lstrip": false,
                     "rstrip": false,
                     "normalized": true,
-                    "special": true
-                },
-                {
-                    "id": self.tokenizer.special_tokens.get("<|endoftext|>").copied().unwrap_or(3),
-                    "content": "<|endoftext|>",
-                    "single_word": false,
-                    "lstrip": false,
-                    "rstrip": false,
-                    "normalized": true,
-                    "special": true
+                    "special": true,
+                    "add_prefix_space": false
                 }
             ],
             "normalizer": null,

@@ -8,7 +8,6 @@ mod bpe_wrapper;
 mod bpe_test;
 mod model;
 mod utils;
-mod tokenizer_fixer;
 
 use inference::InferenceService;
 use training::TrainingService;

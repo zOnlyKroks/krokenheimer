@@ -139,23 +139,8 @@ impl InferenceService {
 
         // Load tokenizer
         let tokenizer_path = Path::new(model_path).join("tokenizer.json");
-        let tokenizer = match Tokenizer::from_file(&tokenizer_path) {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!("Failed to load tokenizer: {}", e);
-                tracing::info!("Attempting to fix tokenizer format...");
-
-                // Try to fix the tokenizer format
-                if let Err(fix_error) = crate::tokenizer_fixer::fix_tokenizer_format(&tokenizer_path.to_string_lossy()) {
-                    tracing::error!("Failed to fix tokenizer format: {}", fix_error);
-                    return Err(anyhow!("Failed to load tokenizer from {}: {}", tokenizer_path.display(), e));
-                }
-
-                // Try loading again after fix
-                Tokenizer::from_file(&tokenizer_path)
-                    .map_err(|e2| anyhow!("Failed to load tokenizer from {} even after format fix: {}", tokenizer_path.display(), e2))?
-            }
-        };
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| anyhow!("Failed to load tokenizer from {}: {}", tokenizer_path.display(), e))?;
 
         // Load model config
         let config_path = Path::new(model_path).join("config.json");
