@@ -245,12 +245,16 @@ export class RustMLService {
   async trainModel(trainingDataPath: string, epochs: number = 3): Promise<boolean> {
     if (this.rustModule) {
       try {
-        const outputPath = `./data/models/krokenheimer-rust-${Date.now()}`;
+        // Use consistent model path instead of timestamped directory
+        const outputPath = this.modelPath; // Use the same path as inference
+
+        // Backup existing model if it exists
+        await this.backupExistingModel(outputPath);
+
         const result = this.rustModule.trainModel(trainingDataPath, outputPath, epochs);
 
         if (result) {
-          // Update model path to new trained model
-          this.modelPath = outputPath;
+          // Model path stays the same - no need to update
           // Reload the model
           await this.initialize();
           console.log(`[RustML] Training completed successfully. New model: ${outputPath}`);
@@ -291,7 +295,7 @@ export class RustMLService {
 
     return {
       model: 'krokenheimer-rust (fallback mode)',
-      temperature: 0.9,
+      temperature: 0.3,  // Match the coherent setting
       maxTokens: 100,
       contextWindow: 512,
       backend: 'fallback'
@@ -312,6 +316,46 @@ export class RustMLService {
       version: '0.1.0',
       status: 'fallback_mode'
     };
+  }
+
+  /**
+   * Backup existing model before training to prevent data loss
+   */
+  private async backupExistingModel(modelPath: string): Promise<void> {
+    try {
+      const configPath = `${modelPath}/config.json`;
+      const weightsPath = `${modelPath}/model.safetensors`;
+      const tokenizerPath = `${modelPath}/tokenizer.json`;
+
+      // Check if model exists
+      try {
+        await fs.access(configPath);
+        await fs.access(weightsPath);
+        await fs.access(tokenizerPath);
+
+        // Create backup with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = `${modelPath}-backup-${timestamp}`;
+
+        console.log(`[RustML] Backing up existing model to: ${backupPath}`);
+
+        // Create backup directory
+        await fs.mkdir(backupPath, { recursive: true });
+
+        // Copy files
+        await fs.copyFile(configPath, `${backupPath}/config.json`);
+        await fs.copyFile(weightsPath, `${backupPath}/model.safetensors`);
+        await fs.copyFile(tokenizerPath, `${backupPath}/tokenizer.json`);
+
+        console.log('[RustML] Model backup completed successfully');
+      } catch {
+        // No existing model to backup
+        console.log('[RustML] No existing model found - no backup needed');
+      }
+    } catch (error) {
+      console.warn('[RustML] Failed to backup model:', error);
+      // Continue anyway - don't block training
+    }
   }
 }
 
