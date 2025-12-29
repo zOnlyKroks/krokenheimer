@@ -238,13 +238,13 @@ export class RustMLService {
         if (currentMsg.authorName === nextMsg.authorName) continue;
         if (currentMsg.authorName === 'Krokenheimer') continue;
 
-        // Filter out garbage from Discord messages
+        // Clean up Discord mentions and spam, but keep URLs/GIFs
         const cleanContent = (text: string): string => {
           return text
-            // Remove URLs (http/https links)
-            .replace(/https?:\/\/\S+/g, '')
-            // Remove Discord attachment URLs
-            .replace(/https:\/\/(?:cdn|media)\.discord(?:app)?\.(?:com|net)\/[^\s]+/g, '')
+            // Remove Discord attachment URLs (just noise)
+            .replace(/https:\/\/(?:cdn|media)\.discord(?:app)?\.(?:com|net)\/attachments\/[^\s]+/g, '')
+            // Replace tenor GIFs with placeholder but keep them
+            .replace(/https:\/\/tenor\.com\/view\/[^\s]+/g, '[gif]')
             // Remove user mentions
             .replace(/<@!?\d+>/g, '')
             // Remove channel mentions
@@ -258,11 +258,21 @@ export class RustMLService {
             .trim();
         };
 
+        // Check if message is mostly just URLs (bad training data)
+        const isUrlSpam = (text: string): boolean => {
+          const urlCount = (text.match(/https?:\/\/\S+/g) || []).length;
+          const textWithoutUrls = text.replace(/https?:\/\/\S+/g, '').trim();
+          // If more than 2 URLs or if text without URLs is very short
+          return urlCount > 2 || (urlCount > 0 && textWithoutUrls.length < 10);
+        };
+
         const userContent = cleanContent(currentMsg.content);
         const botContent = nextMsg.authorName === 'Krokenheimer' ? cleanContent(nextMsg.content) : '👍';
 
-        // Skip if content is empty after cleaning
-        if (!userContent || userContent.length < 3) continue;
+        // Skip messages that are mostly URL spam or too short
+        if (!userContent || userContent.length < 5) continue;
+        if (isUrlSpam(currentMsg.content)) continue;
+        if (nextMsg.authorName === 'Krokenheimer' && isUrlSpam(nextMsg.content)) continue;
 
         // Create training conversation
         trainingData.push({
