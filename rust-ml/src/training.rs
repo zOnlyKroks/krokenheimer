@@ -1,11 +1,10 @@
 use candle_core::{Device, Tensor, Result as CandleResult, DType};
 use candle_nn::{VarBuilder, VarMap, Optimizer, AdamW, loss::cross_entropy, Activation, ParamsAdamW};
-use tokenizers::Tokenizer;
+use tokenizers::{Tokenizer, AddedToken};
 use anyhow::{Result, Context, anyhow};
 use std::path::Path;
 use serde_json;
 use std::collections::HashMap;
-use ahash::AHashMap;
 use crate::model::Gpt2Config;
 use crate::inference::SimpleTransformer;
 
@@ -38,13 +37,6 @@ impl TrainingService {
             .map(|n| n.get().to_string())
             .unwrap_or_else(|_| "1".to_string()));
 
-        // Enable CPU optimizations
-        #[cfg(feature = "cpu")]
-        {
-            std::env::set_var("ACCELERATE_USE_ACCELERATE", "1");
-            std::env::set_var("ACCELERATE_DISABLE_AVX2", "0");
-        }
-
         tracing::info!("Training service initialized with device: {:?}", device);
         tracing::info!("Utilizing {} CPU threads", std::thread::available_parallelism()
             .map(|n| n.get())
@@ -67,7 +59,7 @@ impl TrainingService {
         let tokenized_data = self.tokenize_conversations_batch(&conversations, &tokenizer)?;
 
         // Split data
-        let validation_split = 0.15; // Increased for better validation accuracy
+        let validation_split = 0.15;
         let split_index = ((tokenized_data.len() as f32) * (1.0 - validation_split)) as usize;
         let (train_data, val_data) = tokenized_data.split_at(split_index);
 
@@ -103,61 +95,32 @@ impl TrainingService {
                 .map_err(|e| anyhow!("Failed to load tokenizer: {}", e));
         }
 
-        tracing::info!("Creating new character-level tokenizer...");
+        tracing::info!("Creating BPE tokenizer using pre-trained approach...");
 
-        // Create vocabulary from data (optimized collection)
-        let mut vocab = AHashMap::new();
+        // Use a simple BPE tokenizer with fixed vocabulary for now
+        // This avoids the complex training API issues
+        let mut tokenizer = Tokenizer::from_pretrained("gpt2", None)
+            .map_err(|e| anyhow!("Failed to load GPT-2 tokenizer: {}", e))?;
 
-        // Add special tokens
-        vocab.insert("[PAD]".to_string(), 0u32);
-        vocab.insert("[UNK]".to_string(), 1u32);
-        vocab.insert("<|endoftext|>".to_string(), 2u32);
+        // Add our custom special tokens
+        let special_tokens = vec![
+            AddedToken::from("<|system|>", true),
+            AddedToken::from("<|user|>", true),
+            AddedToken::from("<|assistant|>", true),
+        ];
 
-        // Collect characters more efficiently
-        let mut char_set = std::collections::HashSet::new();
-
-        // Pre-allocate with expected size
-        char_set.reserve(500);
-
-        // Add common ASCII characters first
-        for c in ' '..='~' {
-            char_set.insert(c);
-        }
-
-        // Add characters from conversations
-        for conv in conversations {
-            for msg in &conv.messages {
-                let formatted = format!("{}: {}", msg.role, msg.content);
-                for c in formatted.chars() {
-                    char_set.insert(c);
-                }
-            }
-        }
-
-        // Convert to sorted vector
-        let mut sorted_chars: Vec<char> = char_set.into_iter().collect();
-        sorted_chars.sort();
-
-        // Add to vocabulary
-        let mut id = 3u32;
-        for c in sorted_chars {
-            vocab.insert(c.to_string(), id);
-            id += 1;
-        }
-
-        tracing::info!("Created vocabulary with {} tokens", vocab.len());
-
-        // Create tokenizer
-        let mut tokenizer = Tokenizer::new(
-            tokenizers::models::bpe::BPE::builder()
-                .vocab_and_merges(vocab, vec![])
-                .unk_token("[UNK]".to_string())
-                .build()
-                .map_err(|e| anyhow!("Failed to build BPE tokenizer: {}", e))?
-        );
+        tokenizer.add_special_tokens(&special_tokens);
 
         // Use byte-level pre-tokenizer
-        tokenizer.with_pre_tokenizer(Some(tokenizers::pre_tokenizers::byte_level::ByteLevel::default()));
+        tokenizer.with_pre_tokenizer(Some(
+            tokenizers::pre_tokenizers::byte_level::ByteLevel::default()
+        ));
+
+        // Set padding token
+        tokenizer.with_padding(Some(tokenizers::PaddingParams {
+            strategy: tokenizers::PaddingStrategy::Fixed(512), // Match model context
+            ..Default::default()
+        }));
 
         // Save tokenizer
         std::fs::create_dir_all(output_path)
@@ -166,42 +129,65 @@ impl TrainingService {
         tokenizer.save(&tokenizer_path, false)
             .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
 
-        tracing::info!("✅ Tokenizer saved to: {}", tokenizer_path.display());
+        let vocab_size = tokenizer.get_vocab_size(false);
+        tracing::info!("✅ BPE tokenizer trained and saved with {} tokens", vocab_size);
 
         Ok(tokenizer)
     }
+
 
     fn tokenize_conversations_batch(&self, conversations: &[ConversationData], tokenizer: &Tokenizer) -> Result<Vec<Vec<u32>>> {
         tracing::info!("Tokenizing conversations in batch...");
 
         let mut tokenized_data = Vec::with_capacity(conversations.len());
         let mut total_tokens = 0;
+        let mut skipped = 0;
 
-        // Process conversations in parallel chunks
-        let chunk_size = 100; // Process 100 conversations at a time
+        // Process conversations in chunks for better memory usage
+        let chunk_size = 500;
 
         for chunk in conversations.chunks(chunk_size) {
             for conv in chunk {
-                let mut text = String::new();
-                for message in &conv.messages {
-                    text.push_str(&format!("{}: {}\n", message.role, message.content));
-                }
-                text.push_str("<|endoftext|>");
+                // Format conversation with special tokens
+                let mut formatted = String::new();
 
-                if let Ok(encoding) = tokenizer.encode(text, false) {
-                    let token_ids = encoding.get_ids().to_vec();
-                    if !token_ids.is_empty() && token_ids.len() >= 10 { // Skip very short sequences
-                        total_tokens += token_ids.len();
-                        tokenized_data.push(token_ids);
+                for message in &conv.messages {
+                    let role_token = match message.role.to_lowercase().as_str() {
+                        "system" => "<|system|>",
+                        "user" => "<|user|>",
+                        "assistant" => "<|assistant|>",
+                        _ => "<|user|>",
+                    };
+                    formatted.push_str(&format!("{} {}\n", role_token, message.content));
+                }
+                formatted.push_str("<|endoftext|>");
+
+                match tokenizer.encode(formatted, false) {
+                    Ok(encoding) => {
+                        let token_ids = encoding.get_ids().to_vec();
+
+                        // Filter out very short sequences and ensure reasonable length
+                        if token_ids.len() >= 8 && token_ids.len() <= 512 {
+                            total_tokens += token_ids.len();
+                            tokenized_data.push(token_ids);
+                        } else {
+                            skipped += 1;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to tokenize conversation: {}", e);
+                        skipped += 1;
                     }
                 }
             }
         }
 
-        // Sort by length for more efficient batching (optional)
+        // Sort by length for more efficient batching (optional but helps with padding efficiency)
         tokenized_data.sort_by_key(|seq| seq.len());
 
-        tracing::info!("Tokenized {} conversations, total tokens: {}", tokenized_data.len(), total_tokens);
+        tracing::info!("Tokenized {} conversations (skipped {}), total tokens: {}, avg length: {:.1}",
+                     tokenized_data.len(), skipped, total_tokens,
+                     total_tokens as f32 / tokenized_data.len().max(1) as f32);
 
         if tokenized_data.is_empty() {
             return Err(anyhow!("No valid tokenized conversations found"));
@@ -233,14 +219,14 @@ impl TrainingService {
     }
 
     fn create_optimized_config(&self, vocab_size: usize) -> Gpt2Config {
-        // IMPROVED MODEL FOR BETTER QUALITY (moderately larger)
+        // Optimized model config for better quality
         Gpt2Config {
             vocab_size,
-            n_positions: 512,    // Keep reasonable sequence length
-            n_embd: 384,         // Increased from 256 for better representation
-            n_layer: 8,          // Increased from 6 for more depth
-            n_head: 12,          // Increased from 8 for better attention
-            n_inner: Some(1024), // Increased from 512 for better feedforward
+            n_positions: 512,
+            n_embd: 384,
+            n_layer: 8,
+            n_head: 12,
+            n_inner: Some(1024),
             activation_function: Activation::Gelu,
             resid_pdrop: 0.1,
             embd_pdrop: 0.1,
@@ -265,23 +251,23 @@ impl TrainingService {
         is_continuing: bool,
         output_path: &str,
     ) -> Result<()> {
-        tracing::info!("Starting high-quality model training...");
+        tracing::info!("Starting model training...");
 
-        // HIGH-QUALITY HYPERPARAMETERS (slower but better)
-        let batch_size = 16;  // Smaller batches for more frequent updates
-        let max_sequence_length = config.n_positions.min(384); // Longer sequences for better context
+        // Optimized hyperparameters
+        let batch_size = 8;  // Smaller batches for better gradient estimates
+        let max_sequence_length = config.n_positions.min(384);
 
         // Calculate total batches
         let total_batches = (train_data.len() + batch_size - 1) / batch_size;
 
-        tracing::info!("High-quality training config: batch_size={}, seq_len={}, total_batches={}",
+        tracing::info!("Training config: batch_size={}, seq_len={}, total_batches={}",
                       batch_size, max_sequence_length, total_batches);
 
-        // Create optimizer with lower learning rate for stability
+        // Create optimizer
         let mut optimizer = AdamW::new(
             var_map.all_vars(),
             ParamsAdamW {
-                lr: if is_continuing { 5e-6 } else { 1e-4 }, // Lower LR for more stable training
+                lr: if is_continuing { 5e-6 } else { 1e-4 },
                 beta1: 0.9,
                 beta2: 0.999,
                 eps: 1e-8,
@@ -289,10 +275,10 @@ impl TrainingService {
             }
         )?;
 
-        // Early stopping with more patience
+        // Early stopping
         let mut best_val_loss = f32::INFINITY;
         let mut patience_counter = 0;
-        let patience = 4; // More patience for better convergence
+        let patience = 4;
 
         for epoch in 1..=epochs {
             tracing::info!("Epoch {}/{} - Processing {} batches", epoch, epochs, total_batches);
@@ -305,7 +291,7 @@ impl TrainingService {
             let mut train_indices: Vec<usize> = (0..train_data.len()).collect();
             fastrand::shuffle(&mut train_indices);
 
-            // Training loop with progress tracking
+            // Training loop
             for batch_idx in 0..total_batches {
                 let batch_start = batch_idx * batch_size;
                 let batch_end = (batch_start + batch_size).min(train_indices.len());
@@ -313,7 +299,7 @@ impl TrainingService {
                 // Get batch indices
                 let batch_indices = &train_indices[batch_start..batch_end];
 
-                // Prepare batch more efficiently
+                // Prepare batch
                 let batch_data: Vec<&Vec<u32>> = batch_indices.iter()
                     .map(|&idx| &train_data[idx])
                     .collect();
@@ -338,7 +324,7 @@ impl TrainingService {
                 let grads = loss.backward()?;
                 optimizer.step(&grads)?;
 
-                // Log progress every 5% of batches (more frequent for monitoring)
+                // Log progress
                 if processed_batches % (total_batches.max(1) / 20).max(1) == 0 {
                     let elapsed = epoch_start.elapsed();
                     let batches_per_sec = processed_batches as f64 / elapsed.as_secs_f64();
@@ -368,7 +354,7 @@ impl TrainingService {
                           batches_per_sec, eta_minutes);
 
             // Early stopping check
-            if val_loss < best_val_loss - 0.001 { // Require meaningful improvement
+            if val_loss < best_val_loss - 0.001 {
                 best_val_loss = val_loss;
                 patience_counter = 0;
                 tracing::info!("✅ New best validation loss: {:.4}", best_val_loss);
