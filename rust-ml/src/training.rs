@@ -84,7 +84,7 @@ impl TrainingService {
         let model = SimpleTransformer::load(&weights, &config, var_builder)?;
 
         // Train with optimizations
-        self.train_model_optimized(&model, &var_map, train_data, val_data, epochs, &config, is_continuing)?;
+        self.train_model_optimized(&model, &var_map, train_data, val_data, epochs, &config, is_continuing, output_path)?;
 
         // Save model
         self.save_model(&model, &tokenizer, &config, &var_map, output_path)?;
@@ -263,6 +263,7 @@ impl TrainingService {
         epochs: u32,
         config: &Gpt2Config,
         is_continuing: bool,
+        output_path: &str,
     ) -> Result<()> {
         tracing::info!("Starting optimized model training...");
 
@@ -373,9 +374,11 @@ impl TrainingService {
                 tracing::info!("✅ New best validation loss: {:.4}", best_val_loss);
 
                 // Save checkpoint on improvement
-                let checkpoint_path = format!("{}/checkpoint_epoch_{}.safetensors", "models", epoch);
+                let checkpoint_path = Path::new(output_path).join(format!("checkpoint_epoch_{}.safetensors", epoch));
                 if let Err(e) = var_map.save(&checkpoint_path) {
                     tracing::warn!("Failed to save checkpoint: {}", e);
+                } else {
+                    tracing::info!("💾 Checkpoint saved: {}", checkpoint_path.display());
                 }
             } else {
                 patience_counter += 1;
