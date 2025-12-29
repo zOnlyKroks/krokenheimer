@@ -3,6 +3,8 @@ use neon::prelude::*;
 mod inference;
 mod training;
 mod tokenizer;
+mod bpe_tokenizer;
+mod bpe_wrapper;
 mod model;
 mod utils;
 

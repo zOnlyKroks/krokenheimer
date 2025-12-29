@@ -1,26 +1,27 @@
 use candle_core::{Device, Tensor, Result as CandleResult, DType};
 use candle_nn::{VarBuilder, VarMap, Optimizer, AdamW, loss::cross_entropy, Activation, ParamsAdamW};
-use tokenizers::{Tokenizer, AddedToken};
+use tokenizers::Tokenizer;
 use anyhow::{Result, Context, anyhow};
 use std::path::Path;
 use serde_json;
 use std::collections::HashMap;
 use crate::model::Gpt2Config;
 use crate::inference::SimpleTransformer;
+use crate::bpe_wrapper::BPETokenizerWrapper;
 
 pub struct TrainingService {
     device: Device,
 }
 
 #[derive(serde::Deserialize)]
-struct TrainingMessage {
-    role: String,
-    content: String,
+pub struct TrainingMessage {
+    pub role: String,
+    pub content: String,
 }
 
 #[derive(serde::Deserialize)]
-struct ConversationData {
-    messages: Vec<TrainingMessage>,
+pub struct ConversationData {
+    pub messages: Vec<TrainingMessage>,
 }
 
 impl TrainingService {
@@ -85,58 +86,86 @@ impl TrainingService {
         Ok(())
     }
 
-    fn create_or_load_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
-        let tokenizer_path = Path::new(output_path).join("tokenizer.json");
+    fn create_or_load_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<BPETokenizerWrapper> {
+        let bpe_tokenizer_path = Path::new(output_path).join("bpe_tokenizer.json");
+        let tokenizer_json_path = Path::new(output_path).join("tokenizer.json");
 
-        // Try to load existing tokenizer first
-        if tokenizer_path.exists() {
-            tracing::info!("Loading existing tokenizer from: {}", tokenizer_path.display());
-            return Tokenizer::from_file(&tokenizer_path)
-                .map_err(|e| anyhow!("Failed to load tokenizer: {}", e));
+        // Try to load existing BPE tokenizer first
+        if bpe_tokenizer_path.exists() {
+            tracing::info!("Loading existing BPE tokenizer from: {}", bpe_tokenizer_path.display());
+            return BPETokenizerWrapper::load(output_path);
         }
 
-        tracing::info!("Creating BPE tokenizer using pre-trained approach...");
+        // Try to load existing tokenizer.json for backward compatibility
+        if tokenizer_json_path.exists() {
+            tracing::info!("Found existing tokenizer.json, attempting to load...");
+            if let Ok(old_tokenizer) = Tokenizer::from_file(&tokenizer_json_path) {
+                tracing::info!("Loaded existing tokenizer with {} tokens", old_tokenizer.get_vocab_size(false));
+                // Create a wrapper that mimics the old tokenizer for compatibility
+                return self.create_wrapper_from_existing_tokenizer(old_tokenizer);
+            }
+        }
 
-        // Use a simple BPE tokenizer with fixed vocabulary for now
-        // This avoids the complex training API issues
-        let mut tokenizer = Tokenizer::from_pretrained("gpt2", None)
-            .map_err(|e| anyhow!("Failed to load GPT-2 tokenizer: {}", e))?;
+        tracing::info!("🚀 Training custom BPE tokenizer from scratch on {} conversations...", conversations.len());
 
-        // Add our custom special tokens
-        let special_tokens = vec![
-            AddedToken::from("<|system|>", true),
-            AddedToken::from("<|user|>", true),
-            AddedToken::from("<|assistant|>", true),
-        ];
+        // Determine target vocabulary size based on data size
+        let target_vocab_size = self.calculate_optimal_vocab_size(conversations);
 
-        tokenizer.add_special_tokens(&special_tokens);
+        tracing::info!("Target vocabulary size: {}", target_vocab_size);
 
-        // Use byte-level pre-tokenizer
-        tokenizer.with_pre_tokenizer(Some(
-            tokenizers::pre_tokenizers::byte_level::ByteLevel::default()
-        ));
+        // Train our custom BPE tokenizer
+        let tokenizer_wrapper = BPETokenizerWrapper::train_and_save(conversations, output_path, target_vocab_size)?;
 
-        // Set padding token
-        tokenizer.with_padding(Some(tokenizers::PaddingParams {
-            strategy: tokenizers::PaddingStrategy::Fixed(512), // Match model context
-            ..Default::default()
-        }));
+        let final_vocab_size = tokenizer_wrapper.get_vocab_size(false);
+        tracing::info!("✅ Custom BPE tokenizer trained and saved with {} tokens", final_vocab_size);
+        tracing::info!("   - Vocabulary learned directly from your conversation data");
+        tracing::info!("   - No pre-trained weights used - completely custom!");
 
-        // Save tokenizer
-        std::fs::create_dir_all(output_path)
-            .with_context(|| format!("Failed to create output directory: {}", output_path))?;
+        Ok(tokenizer_wrapper)
+    }
 
-        tokenizer.save(&tokenizer_path, false)
-            .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
+    fn calculate_optimal_vocab_size(&self, conversations: &[ConversationData]) -> usize {
+        // Calculate vocabulary size based on data characteristics
+        let mut total_chars = 0;
+        let mut unique_words = std::collections::HashSet::new();
 
-        let vocab_size = tokenizer.get_vocab_size(false);
-        tracing::info!("✅ BPE tokenizer trained and saved with {} tokens", vocab_size);
+        for conv in conversations {
+            for message in &conv.messages {
+                total_chars += message.content.len();
+                for word in message.content.split_whitespace() {
+                    unique_words.insert(word.to_lowercase());
+                }
+            }
+        }
 
-        Ok(tokenizer)
+        let unique_word_count = unique_words.len();
+
+        // Base vocabulary size: start with a reasonable minimum
+        let base_size = 2000; // Covers basic characters, bytes, common subwords
+
+        // Scale based on unique words (but don't make it too large)
+        let word_factor = (unique_word_count as f64 * 0.5).min(8000.0) as usize;
+
+        // Scale based on total character count (for subword diversity)
+        let char_factor = (total_chars as f64 / 10000.0).min(2000.0) as usize;
+
+        let calculated_size = base_size + word_factor + char_factor;
+
+        // Clamp to reasonable bounds
+        calculated_size.max(1500).min(15000)
+    }
+
+    fn create_wrapper_from_existing_tokenizer(&self, _tokenizer: Tokenizer) -> Result<BPETokenizerWrapper> {
+        // This is a fallback - if we find an old tokenizer.json, we can't easily convert it
+        // to our BPE format, so we'll return an error and suggest retraining
+        Err(anyhow!(
+            "Found existing tokenizer.json but it's not compatible with the new BPE implementation. \
+             Please delete the existing tokenizer files and retrain to use the new custom BPE tokenizer."
+        ))
     }
 
 
-    fn tokenize_conversations_batch(&self, conversations: &[ConversationData], tokenizer: &Tokenizer) -> Result<Vec<Vec<u32>>> {
+    fn tokenize_conversations_batch(&self, conversations: &[ConversationData], tokenizer: &BPETokenizerWrapper) -> Result<Vec<Vec<u32>>> {
         tracing::info!("Tokenizing conversations in batch...");
 
         let mut tokenized_data = Vec::with_capacity(conversations.len());
@@ -162,7 +191,7 @@ impl TrainingService {
                 }
                 formatted.push_str("<|endoftext|>");
 
-                match tokenizer.encode(formatted, false) {
+                match tokenizer.encode(&*formatted, false) {
                     Ok(encoding) => {
                         let token_ids = encoding.get_ids().to_vec();
 
@@ -519,7 +548,7 @@ impl TrainingService {
         Ok(conversations)
     }
 
-    fn save_model(&self, _model: &SimpleTransformer, tokenizer: &Tokenizer, config: &Gpt2Config, var_map: &VarMap, output_path: &str) -> Result<()> {
+    fn save_model(&self, _model: &SimpleTransformer, tokenizer: &BPETokenizerWrapper, config: &Gpt2Config, var_map: &VarMap, output_path: &str) -> Result<()> {
         tracing::info!("Saving final model...");
 
         std::fs::create_dir_all(output_path)
@@ -536,10 +565,14 @@ impl TrainingService {
         std::fs::write(&config_path, config_json)
             .with_context(|| format!("Failed to write config to {}", config_path.display()))?;
 
-        // Save tokenizer
-        let tokenizer_path = Path::new(output_path).join("tokenizer.json");
-        tokenizer.save(&tokenizer_path, false)
-            .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
+        // Save tokenizer (BPE tokenizer is already saved during training)
+        let bpe_tokenizer_path = Path::new(output_path).join("bpe_tokenizer.json");
+        tokenizer.tokenizer.save(&bpe_tokenizer_path)
+            .map_err(|e| anyhow!("Failed to save BPE tokenizer: {}", e))?;
+
+        // Also save compatible tokenizer.json
+        tokenizer.save_compatible_format(output_path)
+            .map_err(|e| anyhow!("Failed to save compatible tokenizer format: {}", e))?;
 
         tracing::info!("✅ Model saved to: {}", output_path);
         Ok(())
