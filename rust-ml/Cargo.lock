@@ -909,6 +909,7 @@ dependencies = [
  "chrono",
  "neon",
  "neon-build",
+ "num_cpus",
  "rand",
  "serde",
  "serde_json",

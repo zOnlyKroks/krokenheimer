@@ -180,13 +180,14 @@ impl TrainingService {
     }
 
     fn create_model_config(&self, vocab_size: usize) -> Gpt2Config {
+        // Memory-optimized but still capable config (similar to GPT-2 small)
         Gpt2Config {
             vocab_size,
-            n_positions: 1024,
-            n_embd: 1024,  // Increased embedding size
-            n_layer: 16,   // More layers for better learning
-            n_head: 16,    // More attention heads
-            n_inner: Some(4096),  // Larger MLP hidden size
+            n_positions: 768,   // Reduced context window for memory savings
+            n_embd: 768,        // Reduced from 1024 (standard GPT-2 small size)
+            n_layer: 12,        // Reduced from 16 layers
+            n_head: 12,         // Reduced from 16 attention heads
+            n_inner: Some(3072), // Reduced from 4096 (4x embedding)
             activation_function: Activation::Gelu,
             resid_pdrop: 0.1,
             embd_pdrop: 0.1,
@@ -210,8 +211,8 @@ impl TrainingService {
     ) -> Result<()> {
         tracing::info!("Starting model training...");
 
-        let batch_size = 32;  // Increased batch size to utilize more RAM
-        let max_sequence_length = 1024;  // Full context window for better training
+        let batch_size = 16;  // Reduced batch size to prevent memory exhaustion
+        let max_sequence_length = 768;  // Match model's n_positions for memory efficiency
 
         // Create optimizer with current API
         let mut optimizer = AdamW::new(
