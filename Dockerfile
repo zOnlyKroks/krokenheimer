@@ -98,7 +98,7 @@ RUN npm run build && test -f /app/dist/index.js
 RUN npm prune --production
 
 # ------------------------------------------------------------
-# Runtime dirs
+# Runtime dirs and data
 # ------------------------------------------------------------
 RUN mkdir -p \
     /app/data \
@@ -106,6 +106,9 @@ RUN mkdir -p \
     /app/data/models \
     /app/data/checkpoints \
     /var/log/supervisor
+
+# Copy model data and database
+COPY data/ ./data/
 
 RUN chmod +x /app/wait-for-chromadb.sh && \
     cp /app/wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh && \
