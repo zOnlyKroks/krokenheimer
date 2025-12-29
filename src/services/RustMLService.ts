@@ -173,7 +173,7 @@ export class RustMLService {
     try {
       // Prepare training data from stored messages
       const trainingDataPath = await this.prepareTrainingData();
-      const success = await this.trainModel(trainingDataPath, 10);
+      const success = await this.trainModel(trainingDataPath, 20);
 
       if (success) {
         return { success: true };
@@ -242,7 +242,7 @@ export class RustMLService {
     }
   }
 
-  async trainModel(trainingDataPath: string, epochs: number = 3): Promise<boolean> {
+  async trainModel(trainingDataPath: string, epochs: number = 15): Promise<boolean> {
     if (this.rustModule) {
       try {
         // Use consistent model path instead of timestamped directory

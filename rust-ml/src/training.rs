@@ -204,15 +204,15 @@ impl TrainingService {
         // Memory-optimized but still capable config (similar to GPT-2 small)
         Gpt2Config {
             vocab_size,
-            n_positions: 768,   // Reduced context window for memory savings
+            n_positions: 1024,  // Full context window for aggressive training
             n_embd: 768,        // Reduced from 1024 (standard GPT-2 small size)
             n_layer: 12,        // Reduced from 16 layers
             n_head: 12,         // Reduced from 16 attention heads
             n_inner: Some(3072), // Reduced from 4096 (4x embedding)
             activation_function: Activation::Gelu,
-            resid_pdrop: 0.05,  // Lower dropout for better coherence
-            embd_pdrop: 0.05,
-            attn_pdrop: 0.05,
+            resid_pdrop: 0.02,  // Very low dropout for aggressive training
+            embd_pdrop: 0.02,
+            attn_pdrop: 0.02,
             layer_norm_epsilon: 1e-5,
             initializer_range: 0.02,
             scale_attn_weights: true,
@@ -232,18 +232,18 @@ impl TrainingService {
     ) -> Result<()> {
         tracing::info!("Starting model training...");
 
-        let batch_size = 16;  // Reduced batch size to prevent memory exhaustion
-        let max_sequence_length = 768;  // Match model's n_positions for memory efficiency
+        let batch_size = 32;  // Larger batch size for more aggressive training
+        let max_sequence_length = 1024;  // Longer sequences for better context understanding
 
         // Create optimizer with current API
         let mut optimizer = AdamW::new(
             var_map.all_vars(),
             candle_nn::ParamsAdamW {
-                lr: 1e-4,  // Lower learning rate for fine-tuning
-                beta1: 0.9,
-                beta2: 0.999,
+                lr: 2e-3,  // Much higher learning rate for aggressive training
+                beta1: 0.95,  // Higher momentum for faster convergence
+                beta2: 0.99,  // Lower second moment decay for more aggressive updates
                 eps: 1e-8,
-                weight_decay: 0.01,
+                weight_decay: 0.005,  // Lower weight decay for less regularization
             }
         )?;
 
