@@ -70,11 +70,10 @@ RUN npm install
 COPY rust-ml/ ./rust-ml/
 WORKDIR /app/rust-ml
 
-RUN echo "🦀 Building Rust ML module with Neon..." && \
-    npm install && \
-    npx neon-cli build --release && \
-    echo "✅ Neon build completed" && \
-    find . -path "*native/index.node"
+RUN echo "🦀 Building Rust ML module..." && \
+    npm run build && \
+    echo "✅ Rust build completed" && \
+    find . -name "*.node" -o -path "*target/release*" -name "*krokenheimer*"
 
 # ------------------------------------------------------------
 # App source
