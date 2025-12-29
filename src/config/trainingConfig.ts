@@ -77,12 +77,10 @@ export class TrainingConfig {
   getStatusInfo(): {
     botUserId: string | null;
     excludedChannels: string[];
-    multiServerSupport: boolean;
   } {
     return {
       botUserId: this.botUserId,
-      excludedChannels: this.getExcludedChannels(),
-      multiServerSupport: true // Bot learns from ALL servers
+      excludedChannels: this.getExcludedChannels()
     };
   }
 }

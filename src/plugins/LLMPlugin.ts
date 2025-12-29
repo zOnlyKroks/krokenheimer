@@ -936,8 +936,6 @@ ${channelList}
     // Count messages from different servers
     const serverCounts = new Map<string, number>();
     for (const channel of channels) {
-      // In Discord.js, we can't easily get server name from channel ID without fetching
-      // But we can show that it's multi-server
       const fetchedChannel = await this.client?.channels.fetch(channel.channelId).catch(() => null);
       if (fetchedChannel && 'guild' in fetchedChannel && fetchedChannel.guild) {
         const serverName = fetchedChannel.guild.name;
