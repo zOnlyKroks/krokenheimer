@@ -97,9 +97,9 @@ impl TransformerLayer {
 impl MultiHeadAttention {
     fn forward(&self, x: &Tensor) -> CandleResult<Tensor> {
         let qkv = self.c_attn.forward(x)?;
-        // Simplified attention - in a real implementation you'd do proper multi-head attention
-        let scale_factor = Tensor::new(&[0.333f32], qkv.device())?;
-        let output = (&qkv * &scale_factor)?; // Simple averaging instead of proper attention
+        // Simplified attention - create proper scalar tensor for multiplication
+        let scale = Tensor::from_slice(&[0.333f32], &[], qkv.device())?;
+        let output = qkv.broadcast_mul(&scale)?;
         self.c_proj.forward(&output)
     }
 }
@@ -113,12 +113,11 @@ impl MLP {
     }
 
     fn gelu_approximation(&self, x: &Tensor) -> CandleResult<Tensor> {
-        // GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
-        // Simplified approximation: x * sigmoid(1.702 * x)
-        let scale = Tensor::new(&[1.702f32], x.device())?;
-        let scaled_x = (x * &scale)?;
+        // GELU approximation: x * sigmoid(1.702 * x)
+        let scale = Tensor::from_slice(&[1.702f32], &[], x.device())?;
+        let scaled_x = x.broadcast_mul(&scale)?;
         let sigmoid_x = candle_nn::ops::sigmoid(&scaled_x)?;
-        x * &sigmoid_x
+        x.broadcast_mul(&sigmoid_x)
     }
 }
 
