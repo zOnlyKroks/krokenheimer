@@ -771,26 +771,37 @@ ${channelList}
         return;
       }
 
-      await message.reply(
-        '🦀 **Starting local Rust ML training**\n\n' +
-        `📊 **Training Data:**\n` +
-        `• Total messages: ${stats.totalMessages}\n` +
-        `• New messages: ${stats.newMessages}\n` +
-        `• Model version: v${stats.modelVersion}\n\n` +
-        `🦀 **Rust ML Training Process:**\n` +
-        `1. Training data prepared from Discord messages\n` +
-        `2. Local Rust ML training starts\n` +
-        `3. Model weights saved to disk\n` +
-        `4. Bot updated with new trained model\n\n` +
-        `⚡ **Training Info:**\n` +
-        `• Method: CPU-based local training\n` +
-        `• Duration: Variable (depending on data size)\n` +
-        `• Epochs: 10 (default)\n\n` +
-        `💡 **Check Progress:**\n` +
-        `• Use \`!llmtrain status\` to monitor training\n` +
-        `• Training logs will show progress\n` +
-        `• Bot will use new model after completion`
-      );
+      // Actually start the training
+      try {
+        const result = await rustMLService.startTraining();
+        if (result.success) {
+          await message.reply(
+            '🦀 **Rust ML Training Started Successfully!**\n\n' +
+            `📊 **Training Data:**\n` +
+            `• Total messages: ${stats.totalMessages}\n` +
+            `• New messages: ${stats.newMessages}\n` +
+            `• Model version: v${stats.modelVersion}\n\n` +
+            `⚡ **Training Info:**\n` +
+            `• Method: CPU-based local training\n` +
+            `• Duration: Variable (depending on data size)\n` +
+            `• Epochs: 10 (default)\n\n` +
+            `💡 **Check Progress:**\n` +
+            `• Use \`!llmtrain status\` to monitor training\n` +
+            `• Training logs will show progress\n` +
+            `• Bot will use new model after completion`
+          );
+        } else {
+          await message.reply(
+            '❌ **Training Failed to Start**\n\n' +
+            `Error: ${result.error || 'Unknown error occurred'}\n\n` +
+            `💡 Check that the Rust ML module is properly compiled.\n` +
+            `📊 Data: ${stats.totalMessages} messages available for training`
+          );
+        }
+      } catch (error) {
+        await message.reply('❌ Failed to start Rust ML training. Check bot logs for details.');
+        console.error('Failed to start Rust ML training:', error);
+      }
     } else if (command === 'force') {
       // Force immediate training using Rust ML
       const stats = await fineTuningService.getTrainingStats();
