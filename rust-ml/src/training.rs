@@ -167,72 +167,76 @@ impl TrainingService {
     }
 
     fn create_tokenizer(&self, conversations: &[ConversationData], output_path: &str) -> Result<Tokenizer> {
-        tracing::info!("Creating improved word-level tokenizer...");
+        tracing::info!("Creating simple but effective tokenizer...");
 
-        // Collect all unique words and subwords - preserve actual casing from conversations
-        let mut word_counts = std::collections::HashMap::new();
+        // Build comprehensive vocabulary from your actual conversation data
+        let mut vocab = std::collections::HashMap::new();
+
+        // Special tokens first
+        vocab.insert("[PAD]".to_string(), 0u32);
+        vocab.insert("[UNK]".to_string(), 1u32);
+        vocab.insert("[SEP]".to_string(), 2u32);
+        vocab.insert("<|endoftext|>".to_string(), 3u32);
+
+        let mut id = 4u32;
+
+        // Collect ALL words from your conversations - don't filter aggressively
+        let mut word_set = std::collections::HashSet::new();
 
         for conv in conversations {
             for message in &conv.messages {
                 let text = format!("{}: {}", message.role, message.content);
 
-                // Split on whitespace to get words
+                // Simple split on whitespace and add everything
                 for word in text.split_whitespace() {
-                    // Clean punctuation but preserve the main word
-                    let cleaned_word = word.trim_matches(|c: char| c.is_ascii_punctuation());
+                    // Add the raw word
+                    word_set.insert(word.to_string());
 
-                    // Add the clean word (preserve original case)
-                    if !cleaned_word.is_empty() && cleaned_word.len() > 1 {
-                        *word_counts.entry(cleaned_word.to_string()).or_insert(0) += 1;
-                        // Also add lowercase version for better coverage
-                        *word_counts.entry(cleaned_word.to_lowercase()).or_insert(0) += 1;
+                    // Also add lowercase version
+                    word_set.insert(word.to_lowercase());
+
+                    // Handle common contractions and punctuation
+                    if word.contains('\'') {
+                        word_set.insert(word.replace('\'', ""));
                     }
 
-                    // Add punctuation as separate tokens
-                    for ch in word.chars() {
-                        if ch.is_ascii_punctuation() {
-                            *word_counts.entry(ch.to_string()).or_insert(0) += 1;
-                        }
+                    // Add word without ending punctuation
+                    let cleaned = word.trim_end_matches(|c: char| c.is_ascii_punctuation());
+                    if !cleaned.is_empty() && cleaned != word {
+                        word_set.insert(cleaned.to_string());
+                        word_set.insert(cleaned.to_lowercase());
+                    }
+                }
+
+                // Add individual characters for fallback (better than just [UNK])
+                for ch in text.chars() {
+                    if ch.is_alphanumeric() || ch.is_ascii_punctuation() || ch.is_whitespace() {
+                        word_set.insert(ch.to_string());
                     }
                 }
             }
         }
 
-        // Build vocabulary with frequent words/subwords (much better than character-level)
-        let mut vocab = std::collections::HashMap::new();
-        vocab.insert("[PAD]".to_string(), 0u32);
-        vocab.insert("[UNK]".to_string(), 1u32);
-        vocab.insert("[SEP]".to_string(), 2u32);
-        vocab.insert("<|endoftext|>".to_string(), 3u32);
-        vocab.insert("<|user|>".to_string(), 4u32);
-        vocab.insert("<|assistant|>".to_string(), 5u32);
-        vocab.insert("<|system|>".to_string(), 6u32);
-
-        let mut id = 7u32;
-
-        // Add most frequent words first (frequency-based vocabulary)
-        let mut sorted_words: Vec<_> = word_counts.into_iter().collect();
-        sorted_words.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by frequency (descending)
-
-        for (word, count) in sorted_words {
-            if count >= 2 && vocab.len() < 8000 { // Only include words that appear at least twice
+        // Add all collected words to vocabulary
+        for word in word_set {
+            if vocab.len() < 16000 { // Larger vocab for better coverage
                 vocab.insert(word, id);
                 id += 1;
             }
         }
 
-        tracing::info!("Built vocabulary with {} tokens (much better than character-level)", vocab.len());
+        tracing::info!("Built comprehensive vocabulary with {} tokens", vocab.len());
 
-        // Create WordPiece model with the vocabulary
+        // Create simple WordPiece model
         let model = tokenizers::models::wordpiece::WordPiece::builder()
             .vocab(vocab.clone().into_iter().collect::<ahash::AHashMap<String, u32>>())
             .unk_token("[UNK]".to_string())
             .build()
-            .map_err(|e| anyhow!("Failed to build WordPiece tokenizer: {}", e))?;
+            .map_err(|e| anyhow!("Failed to build tokenizer: {}", e))?;
 
         let mut tokenizer = Tokenizer::new(model);
 
-        // Set up whitespace pre-tokenization for better word separation
+        // Use whitespace pre-tokenization
         use tokenizers::pre_tokenizers::whitespace::Whitespace;
         tokenizer.with_pre_tokenizer(Some(Whitespace {}));
 
@@ -245,7 +249,7 @@ impl TrainingService {
             .map_err(|e| anyhow!("Failed to save tokenizer: {}", e))?;
 
         let vocab_size = tokenizer.get_vocab_size(true);
-        tracing::info!("✅ WordPiece tokenizer created with vocab size: {}", vocab_size);
+        tracing::info!("✅ Simple tokenizer created with vocab size: {}", vocab_size);
         tracing::info!("Tokenizer saved to: {}", tokenizer_path.display());
 
         // Test tokenization quality
