@@ -148,31 +148,6 @@ impl<B: Backend> TransformerBlock<B> {
     }
 }
 
-impl<B: AutodiffBackend> TrainStep<LanguageModelBatch<B>, ClassificationOutput<B>> for TransformerLanguageModel<B> {
-    fn step(&self, batch: LanguageModelBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
-        // Forward pass
-        let logits = self.forward(batch.inputs.clone());
-
-        // Calculate cross-entropy loss for next-token prediction
-        let loss = CrossEntropyLoss::new(None, &logits.device());
-
-        // Flatten logits and targets for loss calculation
-        let [batch_size, seq_len] = batch.targets.dims();
-        let logits_dims = logits.dims();
-        let logits_flat = logits.reshape([batch_size * seq_len, logits_dims[2]]);
-        let targets_flat = batch.targets.clone().reshape([batch_size * seq_len]);
-
-        let loss_value = loss.forward(logits_flat.clone(), targets_flat.clone());
-
-        // Create output with loss for backward pass
-        let grads = loss_value.backward();
-        TrainOutput::new(
-            self,
-            grads,
-            ClassificationOutput::new(loss_value.clone(), logits_flat, targets_flat),
-        )
-    }
-}
 
 impl<B: Backend> ValidStep<LanguageModelBatch<B>, ClassificationOutput<B>> for TransformerLanguageModel<B> {
     fn step(&self, batch: LanguageModelBatch<B>) -> ClassificationOutput<B> {
@@ -241,6 +216,24 @@ impl<B: Backend> TransformerLanguageModel<B> {
     }
 }
 
+// Implement TrainStep for proper training integration
+impl<B: AutodiffBackend> TrainStep<LanguageModelBatch<B>, ClassificationOutput<B>> for TransformerLanguageModel<B> {
+    fn step(&self, batch: LanguageModelBatch<B>) -> TrainOutput<ClassificationOutput<B>> {
+        let logits = self.forward(batch.inputs.clone());
+
+        // Calculate loss using cross-entropy
+        let [batch_size, seq_len, vocab_size] = logits.dims();
+        let logits_flat = logits.clone().reshape([batch_size * seq_len, vocab_size]);
+        let targets_flat = batch.targets.clone().reshape([batch_size * seq_len]);
+
+        let loss_fn = CrossEntropyLoss::new(None, &logits_flat.device());
+        let loss = loss_fn.forward(logits_flat.clone(), targets_flat.clone());
+
+        let output = ClassificationOutput::new(loss.clone(), logits_flat, targets_flat);
+        TrainOutput::new(self, output.loss.backward(), output)
+    }
+}
+
 pub struct SimpleBurnService {
     config: TransformerConfig,
     device: NdArrayDevice,
@@ -281,10 +274,6 @@ impl SimpleBurnService {
         self.config.vocab_size = bpe_wrapper.get_vocab_size(false).min(10000);
         tracing::info!("Vocab size: {}", self.config.vocab_size);
 
-        // Create enhanced transformer model with autodiff backend for training
-        let mut model = TransformerLanguageModel::new(&self.config, &self.device);
-        tracing::info!("Transformer model created with {} parameters", self.estimate_params());
-
         // Create training batches from tokenized data
         let training_batches = self.create_training_batches_bpe(&conversations, &bpe_wrapper)?;
         if training_batches.is_empty() {
@@ -294,9 +283,10 @@ impl SimpleBurnService {
         // REAL TRAINING with autodiff backend and proper optimization
         tracing::info!("Starting REAL model training with {} batches", training_batches.len());
 
-        // Convert model to autodiff for training
+        // Create enhanced transformer model with autodiff backend for training
         let autodiff_device = <AutodiffNdArray as Backend>::Device::default();
         let mut model = TransformerLanguageModel::new(&self.config, &autodiff_device);
+        tracing::info!("Transformer model created with {} parameters", self.estimate_params());
 
         // Initialize REAL optimizer
         let mut optimizer = AdamConfig::new()
@@ -349,12 +339,9 @@ impl SimpleBurnService {
                 total_loss += loss_value;
                 batch_count += 1;
 
-                // BACKWARD PASS - compute gradients
-                let grads = loss.backward();
-
-                // PARAMETER UPDATE - extract gradients for the model parameters
-                let param_grads = grads.grads(&model);
-                model = optimizer.step(learning_rate, model, param_grads);
+                // BACKWARD PASS and PARAMETER UPDATE using Burn's TrainStep
+                let step_result = TrainStep::step(&model, batch_autodiff);
+                model = optimizer.step(learning_rate, model, step_result.grads);
 
                 // Log with real loss values and learning rate
                 if batch_idx % 5 == 0 || batch_idx < 10 {
@@ -705,20 +692,23 @@ impl SimpleBurnService {
     fn convert_to_inference_model(&self, trained_model: &TransformerLanguageModel<AutodiffNdArray>) -> Result<TransformerLanguageModel<NdArray>> {
         // Properly convert trained autodiff model to inference model preserving weights
         // Use Burn's Module trait to convert between backends via serialization
-        use burn::record::{FullPrecisionSettings, Recorder};
+        use burn::record::Recorder;
 
         let recorder = CompactRecorder::new();
 
-        // Save the trained model to bytes
+        // Save the trained model to temporary file
+        let temp_path = std::env::temp_dir().join("burn_model_conversion.bin");
         let record = trained_model.clone().into_record();
-        let mut bytes = Vec::new();
-        recorder.record(record, &mut bytes)
+        recorder.record(record, temp_path.clone())
             .map_err(|e| anyhow!("Failed to serialize trained model: {}", e))?;
 
         // Load into inference model
         let inference_model = TransformerLanguageModel::new(&self.config, &self.device);
-        let record = recorder.load(&mut bytes.as_slice(), &self.device)
+        let record = recorder.load(temp_path.clone(), &self.device)
             .map_err(|e| anyhow!("Failed to deserialize model for inference: {}", e))?;
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(temp_path);
 
         Ok(inference_model.load_record(record))
     }
