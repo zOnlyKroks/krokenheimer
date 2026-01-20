@@ -1,7 +1,6 @@
 use neon::prelude::*;
 
 mod tokenizer;
-mod bpe_tokenizer;
 mod bpe_wrapper;
 mod utils;
 mod simple_burn;

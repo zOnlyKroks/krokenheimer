@@ -329,7 +329,7 @@ impl SimpleBurnService {
 
                 // Forward pass with REAL loss calculation
                 let logits = model.forward(batch_autodiff.inputs.clone());
-                let [batch_size, seq_len, vocab_size] = logits.dims();
+                let [batch_size, _seq_len, _vocab_size] = logits.dims();
 
                 // Proper cross-entropy loss with label shifting
                 let loss = self.calculate_cross_entropy_loss(&logits, &batch_autodiff.targets)?;
@@ -905,23 +905,18 @@ impl BurnInferenceService {
         // Use Burn's argmax operation to find the token with highest probability
         let argmax_tensor = logits.clone().argmax(0);
 
-        // Convert the argmax result to a scalar value
+        // Extract the scalar value properly using Burn's data API
         let argmax_data = argmax_tensor.into_data();
-        let argmax_bytes = argmax_data.bytes;
 
-        // Extract the index as u32 (this is a bit hacky but works for now)
-        // The argmax result should be a single integer value
-        if argmax_bytes.len() >= 4 {
-            let bytes_array: [u8; 4] = [
-                argmax_bytes[0],
-                argmax_bytes[1],
-                argmax_bytes[2],
-                argmax_bytes[3]
-            ];
-            let token_id = u32::from_le_bytes(bytes_array);
-            Ok(token_id.min((self.config.vocab_size - 1) as u32))
+        // Convert to proper integer type based on the tensor element type
+        // argmax returns an Int tensor, so we can safely extract the value
+        let values: Vec<i64> = argmax_data.iter::<i64>().collect();
+        if let Some(&argmax_value) = values.first() {
+            // Safely convert to u32 and clamp to vocabulary range
+            let token_id = (argmax_value as u32).min((self.config.vocab_size - 1) as u32);
+            Ok(token_id)
         } else {
-            // Fallback if we can't extract the value
+            // Fallback to first valid token (not <pad> which is typically 0)
             Ok(1)
         }
     }

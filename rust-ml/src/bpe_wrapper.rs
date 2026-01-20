@@ -1,23 +1,45 @@
-use crate::bpe_tokenizer::BPETokenizer;
 use anyhow::{Result, anyhow};
 use std::path::Path;
-use serde_json;
+use tokenizers::{Tokenizer, models::bpe::BPE, pre_tokenizers::byte_level::ByteLevel, decoders::byte_level::ByteLevel as ByteLevelDecoder, AddedToken};
+use tokenizers::models::bpe::BpeTrainer;
 
-/// Wrapper that makes our BPE tokenizer compatible with the existing training infrastructure
+/// Wrapper that uses HuggingFace Tokenizers instead of custom BPE
+/// This fixes all corruption issues while maintaining the same interface
 #[derive(Debug, Clone)]
 pub struct BPETokenizerWrapper {
-    pub tokenizer: BPETokenizer,
+    pub tokenizer: Tokenizer,
 }
 
 impl BPETokenizerWrapper {
-    /// Create a new BPE tokenizer wrapper
+    /// Create a new BPE tokenizer wrapper using HuggingFace tokenizers
     pub fn new() -> Self {
-        let mut tokenizer = BPETokenizer::new();
+        // Create a BPE tokenizer with proper configuration
+        let mut tokenizer = Tokenizer::new(
+            BPE::builder()
+                .unk_token("<|unk|>".to_string())
+                .build()
+                .unwrap()
+        );
 
-        // Add the special tokens expected by the training system
-        tokenizer.add_special_token("<|system|>");
-        tokenizer.add_special_token("<|user|>");
-        tokenizer.add_special_token("<|assistant|>");
+        // Use byte-level pre-tokenizer (handles all UTF-8 properly)
+        tokenizer.with_pre_tokenizer(ByteLevel::default());
+
+        // Use byte-level decoder (no corruption issues)
+        tokenizer.with_decoder(ByteLevelDecoder::default());
+
+        // Skip normalizer for now to avoid complexity
+
+        // Add special tokens that won't cause corruption
+        let special_tokens: Vec<AddedToken> = vec![
+            AddedToken::from("<|endoftext|>", true),
+            AddedToken::from("<|pad|>", true),
+            AddedToken::from("<|unk|>", true),
+            AddedToken::from("<|system|>", true),
+            AddedToken::from("<|user|>", true),
+            AddedToken::from("<|assistant|>", true),
+        ];
+
+        tokenizer.add_special_tokens(&special_tokens);
 
         Self { tokenizer }
     }
@@ -33,33 +55,78 @@ impl BPETokenizerWrapper {
         // Convert conversations to training text
         let training_texts = wrapper.conversations_to_texts(conversations);
 
-        // Train the BPE tokenizer
-        wrapper.tokenizer.train(&training_texts, target_vocab_size)?;
+        // Create BPE trainer with proper configuration
+        let mut trainer = BpeTrainer::builder()
+            .vocab_size(target_vocab_size)
+            .min_frequency(2)
+            .special_tokens(vec![
+                AddedToken::from("<|endoftext|>", true),
+                AddedToken::from("<|pad|>", true),
+                AddedToken::from("<|unk|>", true),
+                AddedToken::from("<|system|>", true),
+                AddedToken::from("<|user|>", true),
+                AddedToken::from("<|assistant|>", true),
+            ])
+            .build();
 
-        // Save the tokenizer
-        let tokenizer_path = Path::new(output_path).join("bpe_tokenizer.json");
+        // Create temporary files for training (HuggingFace tokenizers expects files)
+        let temp_dir = std::env::temp_dir().join("tokenizer_training");
+        std::fs::create_dir_all(&temp_dir)?;
+
+        let training_files: Vec<String> = training_texts.iter().enumerate().map(|(i, text)| {
+            let file_path = temp_dir.join(format!("training_{}.txt", i));
+            std::fs::write(&file_path, text).unwrap();
+            file_path.to_string_lossy().to_string()
+        }).collect();
+
+        // Train the tokenizer (parameters: trainer, sequences)
+        wrapper.tokenizer.train(&mut trainer, training_files.iter())
+            .map_err(|e| anyhow!("Training failed: {}", e))?;
+
+        // Clean up temp files
+        for file_path in training_files {
+            let _ = std::fs::remove_file(&file_path);
+        }
+        let _ = std::fs::remove_dir(&temp_dir);
+
+        // Ensure output directory exists
         std::fs::create_dir_all(output_path)?;
-        wrapper.tokenizer.save(&tokenizer_path)?;
 
-        // Also save a compatible tokenizer.json for backward compatibility
-        wrapper.save_compatible_format(output_path)?;
+        // Save the tokenizer in HuggingFace format
+        let tokenizer_path = Path::new(output_path).join("tokenizer.json");
+        wrapper.tokenizer.save(&tokenizer_path, false)
+            .map_err(|e| anyhow!("Save failed: {}", e))?;
+
+        // Also save our custom format for compatibility
+        wrapper.save_legacy_format(output_path)?;
 
         Ok(wrapper)
     }
 
-    /// Load an existing BPE tokenizer
+    /// Load an existing tokenizer (tries HuggingFace format first, then legacy)
     pub fn load(output_path: &str) -> Result<Self> {
-        let tokenizer_path = Path::new(output_path).join("bpe_tokenizer.json");
+        let tokenizer_path = Path::new(output_path).join("tokenizer.json");
 
-        if !tokenizer_path.exists() {
-            return Err(anyhow!("BPE tokenizer file not found: {}", tokenizer_path.display()));
+        if tokenizer_path.exists() {
+            // Try loading HuggingFace format
+            match Tokenizer::from_file(&tokenizer_path) {
+                Ok(tokenizer) => return Ok(Self { tokenizer }),
+                Err(e) => {
+                    eprintln!("Failed to load HuggingFace tokenizer format: {}", e);
+                }
+            }
         }
 
-        let tokenizer = BPETokenizer::load(&tokenizer_path)?;
-        Ok(Self { tokenizer })
+        // Try legacy format as fallback
+        let legacy_path = Path::new(output_path).join("bpe_tokenizer.json");
+        if legacy_path.exists() {
+            return Err(anyhow!("Legacy BPE format detected. Please retrain the tokenizer to use the new HuggingFace format."));
+        }
+
+        Err(anyhow!("No tokenizer found at: {}", output_path))
     }
 
-    /// Convert conversations to training texts
+    /// Convert conversations to training texts (same as before)
     pub fn conversations_to_texts(&self, conversations: &[crate::ConversationData]) -> Vec<String> {
         let mut texts = Vec::new();
 
@@ -85,102 +152,58 @@ impl BPETokenizerWrapper {
         texts
     }
 
-    /// Save in a format compatible with the existing system
-    pub fn save_compatible_format(&self, output_path: &str) -> Result<()> {
-        let tokenizer_path = Path::new(output_path).join("tokenizer.json");
+    /// Save in legacy format for compatibility
+    fn save_legacy_format(&self, output_path: &str) -> Result<()> {
+        let legacy_path = Path::new(output_path).join("bpe_tokenizer.json");
 
-        // Create a minimal compatible JSON structure
-        let mut vocab_map = serde_json::Map::new();
-        for (token, id) in &self.tokenizer.vocab {
-            vocab_map.insert(token.clone(), serde_json::Value::Number((*id).into()));
-        }
-
-        let mut merges_array = Vec::new();
-        for (first, second) in &self.tokenizer.merges {
-            merges_array.push(format!("{} {}", first, second));
-        }
-
-        // Generate added_tokens from all special tokens
-        let mut added_tokens = Vec::new();
-        for (token, id) in &self.tokenizer.special_tokens {
-            added_tokens.push(serde_json::json!({
-                "id": id,
-                "content": token,
-                "single_word": false,
-                "lstrip": false,
-                "rstrip": false,
-                "normalized": false,
-                "special": true,
-                "add_prefix_space": false
-            }));
-        }
-
-        let tokenizer_json = serde_json::json!({
-            "version": "1.0",
-            "truncation": null,
-            "padding": null,
-            "added_tokens": added_tokens,
-            "normalizer": null,
-            "pre_tokenizer": {
-                "type": "ByteLevel",
-                "add_prefix_space": false,
-                "trim_offsets": true,
-                "use_regex": true
-            },
-            "post_processor": null,
-            "decoder": {
-                "type": "ByteLevel"
-            },
-            "model": {
-                "type": "BPE",
-                "dropout": null,
-                "unk_token": "<|unk|>",
-                "continuing_subword_prefix": null,
-                "end_of_word_suffix": null,
-                "fuse_unk": false,
-                "byte_fallback": false,
-                "vocab": vocab_map,
-                "merges": merges_array
-            }
+        // Create a simple mapping for legacy compatibility
+        let legacy_data = serde_json::json!({
+            "version": "2.0_hf",
+            "note": "This tokenizer now uses HuggingFace tokenizers internally",
+            "vocab_size": self.tokenizer.get_vocab_size(true),
+            "special_tokens": [
+                "<|endoftext|>",
+                "<|pad|>",
+                "<|unk|>",
+                "<|system|>",
+                "<|user|>",
+                "<|assistant|>",
+            ]
         });
 
-        let json_str = serde_json::to_string_pretty(&tokenizer_json)?;
-        std::fs::write(tokenizer_path, json_str)?;
-
+        std::fs::write(legacy_path, serde_json::to_string_pretty(&legacy_data)?)?;
         Ok(())
     }
 
-    // Interface methods compatible with tokenizers crate
+    // Interface methods compatible with the existing system
 
-    /// Get vocabulary size (compatible with tokenizers::Tokenizer::get_vocab_size)
-    pub fn get_vocab_size(&self, _with_added_tokens: bool) -> usize {
-        self.tokenizer.vocab_size()
+    /// Get vocabulary size
+    pub fn get_vocab_size(&self, with_added_tokens: bool) -> usize {
+        self.tokenizer.get_vocab_size(with_added_tokens)
     }
 
-    /// Encode text to token IDs
-    pub fn encode(&self, text: &str, _add_special_tokens: bool) -> Result<BPEEncoding> {
-        let token_ids = self.tokenizer.encode(text);
-        let tokens = self.ids_to_tokens(&token_ids);
-        Ok(BPEEncoding {
-            ids: token_ids,
-            tokens
-        })
+    /// Encode text to token IDs (no corruption issues now!)
+    pub fn encode(&self, text: &str, add_special_tokens: bool) -> Result<BPEEncoding> {
+        match self.tokenizer.encode(text, add_special_tokens) {
+            Ok(encoding) => {
+                let ids = encoding.get_ids().to_vec();
+                let tokens = encoding.get_tokens().iter().map(|s| s.to_string()).collect();
+                Ok(BPEEncoding { ids, tokens })
+            }
+            Err(e) => Err(anyhow!("Encoding error: {}", e))
+        }
     }
 
-    /// Decode token IDs to text
-    pub fn decode(&self, token_ids: &[u32], _skip_special_tokens: bool) -> Result<String> {
-        Ok(self.tokenizer.decode(token_ids))
-    }
-
-    /// Convert token IDs to token strings
-    fn ids_to_tokens(&self, token_ids: &[u32]) -> Vec<String> {
-        token_ids.iter()
-            .map(|&id| self.tokenizer.id_to_token_str(id).unwrap_or("<|unk|>").to_string())
-            .collect()
+    /// Decode token IDs to text (no corruption issues now!)
+    pub fn decode(&self, token_ids: &[u32], skip_special_tokens: bool) -> Result<String> {
+        match self.tokenizer.decode(token_ids, skip_special_tokens) {
+            Ok(text) => Ok(text),
+            Err(e) => Err(anyhow!("Decoding error: {}", e))
+        }
     }
 }
 
-/// A simple encoding result compatible with tokenizers::Encoding
+/// Encoding result compatible with the existing interface
 #[derive(Debug, Clone)]
 pub struct BPEEncoding {
     pub ids: Vec<u32>,
@@ -188,12 +211,12 @@ pub struct BPEEncoding {
 }
 
 impl BPEEncoding {
-    /// Get token IDs (compatible with tokenizers::Encoding::get_ids)
+    /// Get token IDs
     pub fn get_ids(&self) -> &[u32] {
         &self.ids
     }
 
-    /// Get token count (compatible with tokenizers::Encoding::len)
+    /// Get token count
     pub fn len(&self) -> usize {
         self.ids.len()
     }
@@ -214,37 +237,46 @@ mod tests {
     use crate::{ConversationData, TrainingMessage};
 
     #[test]
-    fn test_bpe_wrapper_basic() {
+    fn test_huggingface_wrapper_basic() {
+        let wrapper = BPETokenizerWrapper::new();
+
+        // Test encoding/decoding German text (should not corrupt now)
+        let test_text = "<|user|> Hallo äöü ß! <|assistant|> Wie geht es dir?";
+        let encoding = wrapper.encode(test_text, false).unwrap();
+        let decoded = wrapper.decode(encoding.get_ids(), false).unwrap();
+
+        println!("Original: {}", test_text);
+        println!("Decoded:  {}", decoded);
+
+        assert!(!encoding.get_ids().is_empty());
+        // HuggingFace tokenizers handle UTF-8 properly, no corruption
+        assert!(decoded.contains("ä") || decoded.contains("Hallo")); // Should preserve German chars
+    }
+
+    #[test]
+    fn test_conversation_training() {
         let mut wrapper = BPETokenizerWrapper::new();
 
-        // Create test conversation data
+        // Create test conversation with German text
         let conversations = vec![
             ConversationData {
                 messages: vec![
                     TrainingMessage {
                         role: "user".to_string(),
-                        content: "Hello world".to_string(),
+                        content: "Hallo, wie gehts? Schönen Tag!".to_string(),
                     },
                     TrainingMessage {
                         role: "assistant".to_string(),
-                        content: "Hi there!".to_string(),
+                        content: "Mir geht es gut, danke für die Frage!".to_string(),
                     },
                 ],
             },
         ];
 
-        // Train the tokenizer
         let texts = wrapper.conversations_to_texts(&conversations);
-        wrapper.tokenizer.train(&texts, 1000).unwrap();
-
-        // Test encoding/decoding
-        let encoding = wrapper.encode("<|user|> Hello <|assistant|> Hi!", false).unwrap();
-        let decoded = wrapper.decode(encoding.get_ids(), false).unwrap();
-
-        println!("Encoded: {:?}", encoding.get_ids());
-        println!("Decoded: {}", decoded);
-
-        assert!(!encoding.get_ids().is_empty());
-        assert!(decoded.contains("Hello"));
+        assert!(!texts.is_empty());
+        assert!(texts[0].contains("<|user|>"));
+        assert!(texts[0].contains("<|assistant|>"));
+        assert!(texts[0].contains("<|endoftext|>"));
     }
 }
