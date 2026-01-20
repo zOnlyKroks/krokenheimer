@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Check if Docker is available
+if ! command -v docker &> /dev/null; then
+    echo "❌ Docker is not installed or not in PATH!"
+    echo "Please install Docker and try again."
+    exit 1
+fi
+
+# Check if Docker daemon is running
+if ! docker info &>/dev/null; then
+    echo "❌ Docker daemon is not running!"
+    echo "Please start Docker and try again."
+    exit 1
+fi
+
 # Load environment variables from .env file
 if [ -f .env ]; then
     echo "📋 Loading environment from .env file..."

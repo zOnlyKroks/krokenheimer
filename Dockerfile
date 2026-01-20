@@ -39,4 +39,4 @@ RUN npm prune --production
 
 EXPOSE 8000
 
-CMD ["node -e /app/dist/index.js"]
+CMD ["node", "/app/dist/index.js"]
