@@ -50,10 +50,15 @@ impl BPETokenizerWrapper {
         output_path: &str,
         target_vocab_size: usize
     ) -> Result<Self> {
-        let mut wrapper = Self::new();
-
         // Convert conversations to training text
-        let training_texts = wrapper.conversations_to_texts(conversations);
+        let training_texts = Self::conversations_to_texts_static(conversations);
+
+        // Create a new BPE model and tokenizer for training
+        let mut tokenizer = Tokenizer::new(BPE::default());
+
+        // Set up pre-tokenizer and decoder
+        tokenizer.with_pre_tokenizer(ByteLevel::default());
+        tokenizer.with_decoder(ByteLevelDecoder::default());
 
         // Create BPE trainer with proper configuration
         let mut trainer = BpeTrainer::builder()
@@ -79,8 +84,8 @@ impl BPETokenizerWrapper {
             file_path.to_string_lossy().to_string()
         }).collect();
 
-        // Train the tokenizer (parameters: trainer, sequences)
-        wrapper.tokenizer.train(&mut trainer, training_files.iter())
+        // Train the tokenizer using the correct API
+        tokenizer.train_from_files(&mut trainer, training_files.clone())
             .map_err(|e| anyhow!("Training failed: {}", e))?;
 
         // Clean up temp files
@@ -94,8 +99,10 @@ impl BPETokenizerWrapper {
 
         // Save the tokenizer in HuggingFace format
         let tokenizer_path = Path::new(output_path).join("tokenizer.json");
-        wrapper.tokenizer.save(&tokenizer_path, false)
+        tokenizer.save(&tokenizer_path, false)
             .map_err(|e| anyhow!("Save failed: {}", e))?;
+
+        let wrapper = Self { tokenizer };
 
         // Also save our custom format for compatibility
         wrapper.save_legacy_format(output_path)?;
@@ -124,6 +131,32 @@ impl BPETokenizerWrapper {
         }
 
         Err(anyhow!("No tokenizer found at: {}", output_path))
+    }
+
+    /// Convert conversations to training texts (static version)
+    pub fn conversations_to_texts_static(conversations: &[crate::ConversationData]) -> Vec<String> {
+        let mut texts = Vec::new();
+
+        for conv in conversations {
+            let mut formatted = String::new();
+
+            for message in &conv.messages {
+                let role_token = match message.role.to_lowercase().as_str() {
+                    "system" => "<|system|>",
+                    "user" => "<|user|>",
+                    "assistant" => "<|assistant|>",
+                    _ => "<|user|>",
+                };
+                formatted.push_str(&format!("{} {}\n", role_token, message.content));
+            }
+            formatted.push_str("<|endoftext|>");
+
+            if !formatted.trim().is_empty() {
+                texts.push(formatted);
+            }
+        }
+
+        texts
     }
 
     /// Convert conversations to training texts (same as before)
