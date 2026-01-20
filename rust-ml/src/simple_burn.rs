@@ -756,11 +756,27 @@ impl BurnInferenceService {
         let device = NdArrayDevice::default();
         let model = TransformerLanguageModel::new(&config, &device);
 
-        // Try to load model weights
+        // Try to load model weights - check both possible extensions
         let model_weights_path = Path::new(model_path).join("model");
-        let model = if model_weights_path.exists() {
+        let model_weights_path_mpk = Path::new(model_path).join("model.mpk");
+
+        let weights_path = if model_weights_path.exists() {
+            model_weights_path
+        } else if model_weights_path_mpk.exists() {
+            model_weights_path_mpk
+        } else {
+            tracing::warn!("No model weights found at {} or {}", model_weights_path.display(), model_weights_path_mpk.display());
+            return Ok(Self {
+                model,
+                bpe_tokenizer,
+                config,
+                device,
+            });
+        };
+
+        let model = if weights_path.exists() {
             let recorder = CompactRecorder::new();
-            match model.load_file(model_weights_path, &recorder, &device) {
+            match model.load_file(weights_path, &recorder, &device) {
                 Ok(loaded_model) => {
                     tracing::info!("Model weights loaded successfully");
                     loaded_model

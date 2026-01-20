@@ -82,17 +82,26 @@ export class RustMLService {
 
   async checkModelExists(): Promise<boolean> {
     if (this.rustModule) {
-      // Check using Rust module
+      // Check using Rust module - match Burn's actual file structure
       try {
         const configPath = path.join(this.modelPath, 'config.json');
         const tokenizerPath = path.join(this.modelPath, 'tokenizer.json');
-        const weightsPath = path.join(this.modelPath, 'model.safetensors');
+        const bpeTokenizerPath = path.join(this.modelPath, 'bpe_tokenizer.json');
+        const weightsPath = path.join(this.modelPath, 'model.mpk'); // Burn saves with .mpk extension
 
         await fs.access(configPath);
-        await fs.access(tokenizerPath);
         await fs.access(weightsPath);
+
+        // Check for either tokenizer format
+        try {
+          await fs.access(tokenizerPath);
+        } catch {
+          await fs.access(bpeTokenizerPath); // BPE tokenizer format
+        }
+
         return true;
-      } catch {
+      } catch (error) {
+        console.log('[RustML] Model file check failed:', error instanceof Error ? error.message : 'Unknown error');
         return false;
       }
     }
@@ -377,14 +386,14 @@ export class RustMLService {
   private async backupExistingModel(modelPath: string): Promise<void> {
     try {
       const configPath = `${modelPath}/config.json`;
-      const weightsPath = `${modelPath}/model.safetensors`;
+      const weightsPath = `${modelPath}/model.mpk`; // Burn saves with .mpk extension
       const tokenizerPath = `${modelPath}/tokenizer.json`;
+      const bpeTokenizerPath = `${modelPath}/bpe_tokenizer.json`;
 
       // Check if model exists
       try {
         await fs.access(configPath);
         await fs.access(weightsPath);
-        await fs.access(tokenizerPath);
 
         // Create backup with timestamp
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -397,8 +406,20 @@ export class RustMLService {
 
         // Copy files
         await fs.copyFile(configPath, `${backupPath}/config.json`);
-        await fs.copyFile(weightsPath, `${backupPath}/model.safetensors`);
-        await fs.copyFile(tokenizerPath, `${backupPath}/tokenizer.json`);
+        await fs.copyFile(weightsPath, `${backupPath}/model.mpk`);
+
+        // Copy tokenizer (whichever format exists)
+        try {
+          await fs.access(tokenizerPath);
+          await fs.copyFile(tokenizerPath, `${backupPath}/tokenizer.json`);
+        } catch {
+          try {
+            await fs.access(bpeTokenizerPath);
+            await fs.copyFile(bpeTokenizerPath, `${backupPath}/bpe_tokenizer.json`);
+          } catch {
+            console.log('[RustML] No tokenizer file found for backup');
+          }
+        }
 
         console.log('[RustML] Model backup completed successfully');
       } catch {
