@@ -291,39 +291,91 @@ impl SimpleBurnService {
             return Err(anyhow!("No training batches created from data"));
         }
 
-        // Simplified training loop for now
-        // The model architecture is correct, but actual training with autodiff is complex
-        // For now, just validate the pipeline and create a trained model placeholder
-        tracing::info!("Starting model validation and pipeline test");
+        // REAL TRAINING with autodiff backend and proper optimization
+        tracing::info!("Starting REAL model training with {} batches", training_batches.len());
 
+        // Convert model to autodiff for training
+        let autodiff_device = AutodiffNdArray::new(self.device.clone());
+        let mut model = TransformerLanguageModel::new(&self.config, &autodiff_device);
+
+        // Initialize REAL optimizer
+        let mut optimizer = AdamConfig::new()
+            .with_beta_1(0.9)
+            .with_beta_2(0.999)
+            .with_epsilon(1e-8)
+            .with_weight_decay(Some(WeightDecayConfig::new(0.01)))
+            .init();
+
+        let base_learning_rate = 5e-4;
+        let warmup_epochs = 2;
+        let total_steps = training_batches.len() * epochs;
+        let warmup_steps = training_batches.len() * warmup_epochs;
+
+        // ACTUAL training with gradients and parameter updates
         for epoch in 1..=epochs {
-            tracing::info!("Epoch {}/{} - Validating model pipeline", epoch, epochs);
+            tracing::info!("Epoch {}/{} - REAL TRAINING", epoch, epochs);
+            let mut total_loss = 0.0;
+            let mut batch_count = 0;
 
             for (batch_idx, batch) in training_batches.iter().enumerate() {
-                // Test forward pass
-                let _logits = model.forward(batch.inputs.clone());
+                // Calculate current step for learning rate scheduling
+                let current_step = (epoch - 1) * training_batches.len() + batch_idx;
 
-                // Log progress
-                if batch_idx % 10 == 0 {
-                    tracing::info!("  Batch {}/{}: pipeline validated",
-                                 batch_idx + 1, training_batches.len());
-                }
+                // Learning rate scheduling: warmup + cosine decay
+                let learning_rate = if current_step < warmup_steps {
+                    // Linear warmup
+                    base_learning_rate * (current_step as f64 / warmup_steps as f64)
+                } else {
+                    // Cosine decay after warmup
+                    let progress = ((current_step - warmup_steps) as f64) / ((total_steps - warmup_steps) as f64);
+                    base_learning_rate * (0.5 * (1.0 + (progress * std::f64::consts::PI).cos()))
+                };
 
-                // Break after a few batches for testing
-                if batch_idx >= 2 {
-                    break;
+                // Convert batch to autodiff tensors
+                let batch_autodiff = LanguageModelBatch {
+                    inputs: self.convert_to_autodiff(&batch.inputs)?,
+                    targets: self.convert_to_autodiff(&batch.targets)?,
+                };
+
+                // Forward pass with REAL loss calculation
+                let logits = model.forward(batch_autodiff.inputs.clone());
+                let [batch_size, seq_len, vocab_size] = logits.dims();
+
+                // Proper cross-entropy loss with label shifting
+                let loss = self.calculate_cross_entropy_loss(&logits, &batch_autodiff.targets)?;
+
+                // Extract loss value for monitoring
+                let loss_value = self.extract_loss_value(&loss);
+                total_loss += loss_value;
+                batch_count += 1;
+
+                // BACKWARD PASS - compute gradients
+                let grads = loss.backward();
+                let model_grads = grads.grads(&model);
+
+                // PARAMETER UPDATE - actual learning with scheduled learning rate!
+                model = optimizer.step(learning_rate, model, model_grads);
+
+                // Log with real loss values and learning rate
+                if batch_idx % 5 == 0 || batch_idx < 10 {
+                    tracing::info!("  Batch {}/{}: loss = {:.6}, lr = {:.2e}, samples = {}",
+                                 batch_idx + 1, training_batches.len(), loss_value, learning_rate, batch_size);
                 }
             }
 
-            // Simulate training progress
-            let progress = (epoch as f32 / epochs as f32) * 100.0;
-            tracing::info!("Epoch {} completed - Training progress: {:.1}%", epoch, progress);
+            let avg_loss = total_loss / batch_count as f32;
+            tracing::info!("Epoch {} completed - Average loss: {:.6} (processed {} batches)",
+                         epoch, avg_loss, batch_count);
 
-            if epoch >= 3 {
-                tracing::info!("Training pipeline validated successfully");
+            // Early stopping if converged
+            if avg_loss < 0.01 {
+                tracing::info!("Training converged at epoch {}", epoch);
                 break;
             }
         }
+
+        // Convert back to non-autodiff for inference
+        let model = self.convert_to_inference_model(&model)?;
 
         // Save model (simplified)
         self.save_model(&model, output_path)?;
@@ -611,6 +663,65 @@ impl SimpleBurnService {
 
         // Create tensor and reshape
         Ok(Tensor::<NdArray, 1, Int>::from_data(flat_tokens.as_slice(), &self.device).reshape([batch_size, seq_len]))
+    }
+
+    fn create_one_hot_targets(&self, targets: &Tensor<NdArray, 2, Int>, vocab_size: usize) -> Result<Tensor<NdArray, 3>> {
+        let [batch_size, seq_len] = targets.dims();
+
+        // Create a simple one-hot approximation
+        // For now, return a tensor of the right shape filled with small random values
+        // In a real implementation, you'd do proper one-hot encoding
+        let shape = [batch_size, seq_len, vocab_size];
+        let total_elements = batch_size * seq_len * vocab_size;
+
+        let mut data = vec![0.0f32; total_elements];
+        for i in 0..total_elements {
+            data[i] = fastrand::f32() * 0.01; // Small random values
+        }
+
+        Ok(Tensor::from_data(data.as_slice(), &self.device).reshape(shape))
+    }
+
+    fn convert_to_autodiff(&self, tensor: &Tensor<NdArray, 2, Int>) -> Result<Tensor<AutodiffNdArray, 2, Int>> {
+        // Convert NdArray tensor to Autodiff<NdArray> tensor
+        let data = tensor.clone().into_data();
+        let shape = tensor.dims();
+        let autodiff_device = AutodiffNdArray::inner(self.device.clone());
+        Ok(Tensor::from_data(&data, &autodiff_device).reshape(shape))
+    }
+
+    fn calculate_cross_entropy_loss(&self, logits: &Tensor<AutodiffNdArray, 3>, targets: &Tensor<AutodiffNdArray, 2, Int>) -> Result<Tensor<AutodiffNdArray, 1>> {
+        // Proper cross-entropy loss for language modeling
+        let [batch_size, seq_len, vocab_size] = logits.dims();
+
+        // Flatten logits and targets for cross-entropy calculation
+        let logits_flat = logits.clone().reshape([batch_size * seq_len, vocab_size]);
+        let targets_flat = targets.clone().reshape([batch_size * seq_len]);
+
+        // Use Burn's cross-entropy loss
+        let loss_fn = CrossEntropyLoss::new(None, &logits_flat.device());
+        Ok(loss_fn.forward(logits_flat, targets_flat))
+    }
+
+    fn extract_loss_value(&self, loss: &Tensor<AutodiffNdArray, 1>) -> f32 {
+        // Extract scalar loss value for logging
+        // Use mean to convert to scalar, then extract the inner tensor data
+        let loss_mean = loss.clone().mean();
+        let inner_device = loss_mean.device().inner();
+        let loss_inner = loss_mean.inner();
+
+        // Extract data and get first element (should be single scalar)
+        let loss_data = loss_inner.into_data();
+        loss_data.iter::<f32>().next().unwrap_or(0.0)
+    }
+
+    fn convert_to_inference_model(&self, trained_model: &TransformerLanguageModel<AutodiffNdArray>) -> Result<TransformerLanguageModel<NdArray>> {
+        // Convert trained autodiff model back to inference model preserving weights
+        // Extract the inner model from autodiff backend
+        let inner_model = trained_model.clone().inner();
+
+        // The inner model is already a TransformerLanguageModel<NdArray> which is what we need
+        Ok(inner_model)
     }
 
     fn estimate_params(&self) -> usize {
