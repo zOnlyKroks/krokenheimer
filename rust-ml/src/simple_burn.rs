@@ -295,7 +295,7 @@ impl SimpleBurnService {
         tracing::info!("Starting REAL model training with {} batches", training_batches.len());
 
         // Convert model to autodiff for training
-        let autodiff_device = AutodiffNdArray::new(self.device.clone());
+        let autodiff_device = Autodiff::new(self.device.clone());
         let mut model = TransformerLanguageModel::new(&self.config, &autodiff_device);
 
         // Initialize REAL optimizer
@@ -351,10 +351,9 @@ impl SimpleBurnService {
 
                 // BACKWARD PASS - compute gradients
                 let grads = loss.backward();
-                let model_grads = grads.grads(&model);
 
                 // PARAMETER UPDATE - actual learning with scheduled learning rate!
-                model = optimizer.step(learning_rate, model, model_grads);
+                model = optimizer.step(learning_rate, model, grads);
 
                 // Log with real loss values and learning rate
                 if batch_idx % 5 == 0 || batch_idx < 10 {
@@ -458,17 +457,10 @@ impl SimpleBurnService {
         let model_path = Path::new(output_path).join("model");
         let recorder = CompactRecorder::new();
 
-        match model.clone().save_file(model_path.clone(), &recorder) {
-            Ok(_) => {
-                tracing::info!("Model weights saved successfully to: {}", model_path.display());
-            }
-            Err(e) => {
-                tracing::warn!("Failed to save model weights: {}. Saving placeholder instead.", e);
-                // Fallback: save placeholder
-                let placeholder_path = Path::new(output_path).join("model_weights.json");
-                std::fs::write(&placeholder_path, "{}")?;
-            }
-        }
+        model.clone().save_file(model_path.clone(), &recorder)
+            .map_err(|e| anyhow!("Failed to save model weights: {}", e))?;
+
+        tracing::info!("Model weights saved successfully to: {}", model_path.display());
 
         tracing::info!("Model saved to: {}", output_path);
         Ok(())
@@ -685,9 +677,8 @@ impl SimpleBurnService {
     fn convert_to_autodiff(&self, tensor: &Tensor<NdArray, 2, Int>) -> Result<Tensor<AutodiffNdArray, 2, Int>> {
         // Convert NdArray tensor to Autodiff<NdArray> tensor
         let data = tensor.clone().into_data();
-        let shape = tensor.dims();
-        let autodiff_device = AutodiffNdArray::inner(self.device.clone());
-        Ok(Tensor::from_data(&data, &autodiff_device).reshape(shape))
+        let autodiff_device = Autodiff::new(self.device.clone());
+        Ok(Tensor::<AutodiffNdArray, 2, Int>::from_data(data, &autodiff_device))
     }
 
     fn calculate_cross_entropy_loss(&self, logits: &Tensor<AutodiffNdArray, 3>, targets: &Tensor<AutodiffNdArray, 2, Int>) -> Result<Tensor<AutodiffNdArray, 1>> {
@@ -704,24 +695,17 @@ impl SimpleBurnService {
     }
 
     fn extract_loss_value(&self, loss: &Tensor<AutodiffNdArray, 1>) -> f32 {
-        // Extract scalar loss value for logging
-        // Use mean to convert to scalar, then extract the inner tensor data
-        let loss_mean = loss.clone().mean();
-        let inner_device = loss_mean.device().inner();
-        let loss_inner = loss_mean.inner();
-
-        // Extract data and get first element (should be single scalar)
+        // Extract scalar loss value for logging by converting to inner backend first
+        let loss_inner = loss.inner();
         let loss_data = loss_inner.into_data();
-        loss_data.iter::<f32>().next().unwrap_or(0.0)
+        loss_data.as_slice::<f32>().map(|s| s[0]).unwrap_or(0.0)
     }
 
     fn convert_to_inference_model(&self, trained_model: &TransformerLanguageModel<AutodiffNdArray>) -> Result<TransformerLanguageModel<NdArray>> {
-        // Convert trained autodiff model back to inference model preserving weights
-        // Extract the inner model from autodiff backend
-        let inner_model = trained_model.clone().inner();
-
-        // The inner model is already a TransformerLanguageModel<NdArray> which is what we need
-        Ok(inner_model)
+        // Save the trained model to a record format and load it back as inference model
+        let record = trained_model.clone().into_record();
+        let inference_model = TransformerLanguageModel::new(&self.config, &self.device);
+        Ok(inference_model.load_record(record))
     }
 
     fn estimate_params(&self) -> usize {
