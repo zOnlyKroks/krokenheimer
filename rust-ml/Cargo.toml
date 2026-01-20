@@ -8,12 +8,11 @@ name = "krokenheimer_ml"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Candle ML framework
-candle-core = "0.9.1"
-candle-nn = "0.9.1"
+# Burn ML framework (CPU-only with NdArray backend)
+burn = { version = "0.14", features = ["train", "ndarray"], default-features = false }
 
-# Tokenization
-tokenizers = { version = "0.22.2", features = ["http"] }
+# Tokenization (compatible version)
+tokenizers = { version = "0.19", features = ["http"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -24,19 +23,12 @@ neon = { version = "1.0", default-features = false, features = ["napi-6"] }
 
 # Utilities
 anyhow = "1.0"
-rand = "0.9.2"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-chrono = { version = "0.4", features = ["serde"] }
-ahash = "0.8.12"
-num_cpus = "1.16"
-fastrand = "2.3.0"
+fastrand = "2.0"
 
 [build-dependencies]
 neon-build = "0.10.1"
 
 [features]
-default = ["cpu"]
-cpu = []
-cuda = ["candle-core/cuda", "candle-nn/cuda"]
-metal = ["candle-core/metal"]
+default = []

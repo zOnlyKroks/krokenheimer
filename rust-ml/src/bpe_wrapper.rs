@@ -24,7 +24,7 @@ impl BPETokenizerWrapper {
 
     /// Train the tokenizer on conversation data and save it
     pub fn train_and_save(
-        conversations: &[crate::training::ConversationData],
+        conversations: &[crate::ConversationData],
         output_path: &str,
         target_vocab_size: usize
     ) -> Result<Self> {
@@ -60,7 +60,7 @@ impl BPETokenizerWrapper {
     }
 
     /// Convert conversations to training texts
-    pub fn conversations_to_texts(&self, conversations: &[crate::training::ConversationData]) -> Vec<String> {
+    pub fn conversations_to_texts(&self, conversations: &[crate::ConversationData]) -> Vec<String> {
         let mut texts = Vec::new();
 
         for conv in conversations {
@@ -211,7 +211,7 @@ impl BPEEncoding {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::training::{ConversationData, TrainingMessage};
+    use crate::{ConversationData, TrainingMessage};
 
     #[test]
     fn test_bpe_wrapper_basic() {

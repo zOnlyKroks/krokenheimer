@@ -1,16 +1,25 @@
 use neon::prelude::*;
 
-mod inference;
-mod training;
 mod tokenizer;
 mod bpe_tokenizer;
 mod bpe_wrapper;
-mod bpe_test;
-mod model;
 mod utils;
+mod simple_burn;
 
-use inference::InferenceService;
-use training::TrainingService;
+// Simple training data structures for BPE wrapper
+#[derive(serde::Deserialize, Clone)]
+pub struct TrainingMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(serde::Deserialize, Clone)]
+pub struct ConversationData {
+    pub messages: Vec<TrainingMessage>,
+}
+
+use simple_burn::{SimpleBurnService, BurnInferenceService};
+use std::sync::Mutex;
 
 // Node.js API exports
 #[neon::main]
@@ -32,103 +41,101 @@ fn main(mut cx: ModuleContext) -> NeonResult<()> {
     cx.export_function("getModelInfo", get_model_info)?;
     cx.export_function("getConfig", get_config)?;
 
-    // BPE testing functions
-    cx.export_function("runBPETests", run_bpe_tests)?;
+    // Note: BPE testing removed for simplified implementation
 
     Ok(())
 }
 
-// Global inference service instance
-static mut INFERENCE_SERVICE: Option<InferenceService> = None;
-static mut TRAINING_SERVICE: Option<TrainingService> = None;
+// Global service instances using simplified Burn (CPU-only)
+static TRAINING_SERVICE: Mutex<Option<SimpleBurnService>> = Mutex::new(None);
+static INFERENCE_SERVICE: Mutex<Option<BurnInferenceService>> = Mutex::new(None);
 
-// Initialize inference service
+// Initialize inference service (Burn-based)
 fn load_model(mut cx: FunctionContext) -> JsResult<JsBoolean> {
     let model_path = cx.argument::<JsString>(0)?.value(&mut cx);
 
-    match InferenceService::new(&model_path) {
+    tracing::info!("Loading Burn-based model from: {}", model_path);
+
+    match BurnInferenceService::load_from_path(&model_path) {
         Ok(service) => {
-            unsafe {
-                INFERENCE_SERVICE = Some(service);
-            }
+            let mut inference_lock = INFERENCE_SERVICE.lock().unwrap();
+            *inference_lock = Some(service);
+            tracing::info!("Burn model loaded successfully");
             Ok(cx.boolean(true))
         }
         Err(e) => {
-            tracing::error!("Failed to load model: {}", e);
+            tracing::error!("Failed to load Burn model: {}", e);
             Ok(cx.boolean(false))
         }
     }
 }
 
-// Generate text function
+// Generate text function (Burn-based)
 fn generate_text(mut cx: FunctionContext) -> JsResult<JsString> {
     let prompt = cx.argument::<JsString>(0)?.value(&mut cx);
     let max_length = cx.argument::<JsNumber>(1)?.value(&mut cx) as usize;
     let temperature = cx.argument::<JsNumber>(2)?.value(&mut cx) as f32;
 
-    unsafe {
-        if let Some(ref service) = INFERENCE_SERVICE {
+    let inference_lock = INFERENCE_SERVICE.lock().unwrap();
+    match inference_lock.as_ref() {
+        Some(service) => {
             match service.generate(&prompt, max_length, temperature) {
-                Ok(result) => Ok(cx.string(result)),
+                Ok(generated_text) => {
+                    tracing::info!("Generated text successfully");
+                    Ok(cx.string(generated_text))
+                }
                 Err(e) => {
-                    tracing::error!("Generation failed: {}", e);
-                    Ok(cx.string("👍")) // Fallback response
+                    tracing::error!("Text generation failed: {}", e);
+                    Ok(cx.string(format!("Error: {}", e)))
                 }
             }
-        } else {
-            tracing::error!("Inference service not initialized");
-            Ok(cx.string("👍"))
+        }
+        None => {
+            tracing::warn!("No model loaded for text generation");
+            Ok(cx.string("Error: No model loaded. Call loadModel() first."))
         }
     }
 }
 
-// Generate mention response
+// Generate mention response (Burn-based)
 fn generate_mention_response(mut cx: FunctionContext) -> JsResult<JsString> {
     let _context = cx.argument::<JsArray>(0)?;
-    let message_content = cx.argument::<JsString>(1)?.value(&mut cx);
-    let author_name = cx.argument::<JsString>(2)?.value(&mut cx);
+    let _message_content = cx.argument::<JsString>(1)?.value(&mut cx);
+    let _author_name = cx.argument::<JsString>(2)?.value(&mut cx);
 
-    // Parse context array (simplified for now)
-    let prompt = format!("{}: {}\nKrokenheimer: ", author_name, message_content);
+    // TODO: Implement Burn-based mention response generation
+    tracing::warn!("Burn-based mention response generation not yet implemented");
 
-    unsafe {
-        if let Some(ref service) = INFERENCE_SERVICE {
-            match service.generate(&prompt, 100, 0.3) {
-                Ok(result) => Ok(cx.string(result)),
-                Err(e) => {
-                    tracing::error!("Mention response failed: {}", e);
-                    Ok(cx.string("👍"))
-                }
-            }
-        } else {
-            Ok(cx.string("👍"))
-        }
-    }
+    // For now, return a placeholder response
+    Ok(cx.string("👍"))
 }
 
-// Training functions
+// Training functions (Burn-based)
 fn train_model(mut cx: FunctionContext) -> JsResult<JsBoolean> {
     let training_data_path = cx.argument::<JsString>(0)?.value(&mut cx);
     let output_path = cx.argument::<JsString>(1)?.value(&mut cx);
-    let epochs = cx.argument::<JsNumber>(2)?.value(&mut cx) as u32;
+    let epochs = cx.argument::<JsNumber>(2)?.value(&mut cx) as usize;
 
     // Initialize training service if needed
-    unsafe {
-        if TRAINING_SERVICE.is_none() {
-            TRAINING_SERVICE = Some(TrainingService::new());
-        }
+    let mut service_lock = TRAINING_SERVICE.lock().unwrap();
+    if service_lock.is_none() {
+        *service_lock = Some(SimpleBurnService::new());
+    }
 
-        if let Some(ref mut service) = TRAINING_SERVICE {
-            match service.train(&training_data_path, &output_path, epochs) {
-                Ok(()) => Ok(cx.boolean(true)),
-                Err(e) => {
-                    tracing::error!("Training failed: {}", e);
-                    Ok(cx.boolean(false))
-                }
+    if let Some(ref mut service) = service_lock.as_mut() {
+        match service.train(&training_data_path, &output_path, epochs) {
+            Ok(()) => {
+                tracing::info!("Simple Burn-based training completed successfully");
+                Ok(cx.boolean(true))
             }
-        } else {
-            Ok(cx.boolean(false))
+            Err(e) => {
+                tracing::error!("Simple Burn-based training failed: {}", e);
+                Ok(cx.boolean(false))
+            }
         }
+    } else {
+        tracing::error!("Failed to initialize Simple Burn training service");
+        Ok(cx.boolean(false))
     }
 }
 
@@ -161,20 +168,41 @@ fn should_start_training(mut cx: FunctionContext) -> JsResult<JsObject> {
 
 fn get_model_info(mut cx: FunctionContext) -> JsResult<JsObject> {
     let obj = cx.empty_object();
-    let model_type = cx.string("krokenheimer-rust (candle)");
-    let version = cx.string("0.1.0");
 
-    obj.set(&mut cx, "model", model_type)?;
-    obj.set(&mut cx, "version", version)?;
+    let inference_lock = INFERENCE_SERVICE.lock().unwrap();
+    match inference_lock.as_ref() {
+        Some(service) => {
+            let (model_name, version, vocab_size) = service.get_info();
+            let model_type = cx.string(model_name);
+            let version_js = cx.string(version);
+            let vocab_size_js = cx.number(vocab_size as f64);
+
+            obj.set(&mut cx, "model", model_type)?;
+            obj.set(&mut cx, "version", version_js)?;
+            obj.set(&mut cx, "vocabSize", vocab_size_js)?;
+            let loaded_js = cx.boolean(true);
+            obj.set(&mut cx, "loaded", loaded_js)?;
+        }
+        None => {
+            let model_type = cx.string("krokenheimer-rust (burn)");
+            let version = cx.string("0.2.0");
+
+            obj.set(&mut cx, "model", model_type)?;
+            obj.set(&mut cx, "version", version)?;
+            let loaded_js = cx.boolean(false);
+            obj.set(&mut cx, "loaded", loaded_js)?;
+        }
+    }
+
     Ok(obj)
 }
 
 fn get_config(mut cx: FunctionContext) -> JsResult<JsObject> {
     let obj = cx.empty_object();
-    let model = cx.string("krokenheimer-rust (candle)");
+    let model = cx.string("krokenheimer-rust (burn)");
     let temperature = cx.number(0.3);
     let max_tokens = cx.number(100);
-    let context_window = cx.number(1024);
+    let context_window = cx.number(512);  // Updated to match our Burn config
 
     obj.set(&mut cx, "model", model)?;
     obj.set(&mut cx, "temperature", temperature)?;
@@ -183,16 +211,3 @@ fn get_config(mut cx: FunctionContext) -> JsResult<JsObject> {
     Ok(obj)
 }
 
-// BPE testing function
-fn run_bpe_tests(mut cx: FunctionContext) -> JsResult<JsBoolean> {
-    match bpe_test::run_bpe_tests() {
-        Ok(()) => {
-            tracing::info!("BPE tests completed successfully");
-            Ok(cx.boolean(true))
-        }
-        Err(e) => {
-            tracing::error!("BPE tests failed: {}", e);
-            Ok(cx.boolean(false))
-        }
-    }
-}

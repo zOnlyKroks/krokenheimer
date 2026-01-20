@@ -136,30 +136,45 @@ impl BPETokenizer {
             }
         }
 
-        // Add byte-level tokens (256 possibilities)
-        for byte_val in 0..=255u8 {
-            let byte_char = if byte_val.is_ascii_graphic() || byte_val == b' ' {
-                (byte_val as char).to_string()
-            } else {
-                format!("<0x{:02X}>", byte_val)
-            };
-
-            if !self.vocab.contains_key(&byte_char) {
+        // Add basic Unicode characters found in text first (prioritize)
+        for ch_str in &chars {
+            if !self.vocab.contains_key(ch_str) {
                 let id = self.next_id;
-                self.vocab.insert(byte_char.clone(), id);
-                self.id_to_token.insert(id, byte_char);
+                self.vocab.insert(ch_str.clone(), id);
+                self.id_to_token.insert(id, ch_str.clone());
                 self.next_id += 1;
             }
         }
 
-        // Also add all Unicode characters found in text
-        for ch_str in chars {
-            if !self.vocab.contains_key(&ch_str) {
+        // Only add common byte-level tokens for handling edge cases
+        let common_bytes = [
+            0x20, // Space
+            0x0A, // Newline
+            0x09, // Tab
+            0x21, 0x22, 0x27, // !, ", '
+            0x28, 0x29, // (, )
+            0x2C, 0x2E, // ,, .
+            0x3A, 0x3B, 0x3F, // :, ;, ?
+        ];
+
+        for &byte_val in &common_bytes {
+            let byte_char = char::from_u32(byte_val as u32).unwrap_or('?');
+            let byte_token = format!("Ġ{}", byte_char); // Use GPT-style prefix
+            if !self.vocab.contains_key(&byte_token) {
                 let id = self.next_id;
-                self.vocab.insert(ch_str.clone(), id);
-                self.id_to_token.insert(id, ch_str);
+                self.vocab.insert(byte_token.clone(), id);
+                self.id_to_token.insert(id, byte_token);
                 self.next_id += 1;
             }
+        }
+
+        // Add unknown token fallback for rare bytes
+        let unk_byte_token = "<|byte|>".to_string();
+        if !self.vocab.contains_key(&unk_byte_token) {
+            let id = self.next_id;
+            self.vocab.insert(unk_byte_token.clone(), id);
+            self.id_to_token.insert(id, unk_byte_token);
+            self.next_id += 1;
         }
 
         Ok(())
@@ -356,18 +371,42 @@ impl BPETokenizer {
 
         for &token_id in token_ids {
             if let Some(token) = self.id_to_token.get(&token_id) {
-                tokens.push(token.as_str());  // Convert &String to &str
+                tokens.push(token.as_str());
+            } else {
+                // Handle unknown token IDs gracefully
+                tokens.push("<|unk|>");
             }
         }
 
         // Join tokens and clean up BPE artifacts
         let mut result = tokens.join("");
 
-        // Replace </w> with space to separate words
-        result = result.replace("</w>", " ");
+        // Clean up BPE-specific artifacts
+        result = result.replace("</w>", " ");     // End of word marker
+        result = result.replace("<|byte|>", "");  // Remove byte fallback tokens
+        result = result.replace("Ġ", " ");        // GPT-style space prefix
 
-        // Clean up multiple spaces and trim
-        result = result.replace("  ", " ");
+        // Clean up control characters and invalid sequences
+        result = result.chars()
+            .filter(|c| {
+                // Keep most characters, filter only problematic control chars
+                !c.is_control() || *c == '\n' || *c == '\t' || *c == ' '
+            })
+            .collect();
+
+        // Remove special tokens that shouldn't appear in normal text
+        result = result.replace("<0x", " ");  // Remove hex byte representations
+        result = result.replace(">", " ");    // Clean up remaining brackets
+
+        // Clean up multiple spaces and normalize whitespace
+        let words: Vec<&str> = result.split_whitespace().collect();
+        result = words.join(" ");
+
+        // Handle German characters properly (since this appears to be German text)
+        result = result.replace("Ã¤", "ä");
+        result = result.replace("Ã¶", "ö");
+        result = result.replace("Ã¼", "ü");
+        result = result.replace("Ã", "ß");
 
         result.trim().to_string()
     }
