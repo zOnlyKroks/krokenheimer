@@ -99,15 +99,86 @@ fn generate_text(mut cx: FunctionContext) -> JsResult<JsString> {
 
 // Generate mention response (Burn-based)
 fn generate_mention_response(mut cx: FunctionContext) -> JsResult<JsString> {
-    let _context = cx.argument::<JsArray>(0)?;
-    let _message_content = cx.argument::<JsString>(1)?.value(&mut cx);
-    let _author_name = cx.argument::<JsString>(2)?.value(&mut cx);
+    let context_array = cx.argument::<JsArray>(0)?;
+    let message_content = cx.argument::<JsString>(1)?.value(&mut cx);
+    let author_name = cx.argument::<JsString>(2)?.value(&mut cx);
 
-    // TODO: Implement Burn-based mention response generation
-    tracing::warn!("Burn-based mention response generation not yet implemented");
+    let inference_lock = INFERENCE_SERVICE.lock().unwrap();
+    match inference_lock.as_ref() {
+        Some(service) => {
+            // Extract context messages from JS array
+            let mut context_messages = Vec::new();
+            let context_length = context_array.len(&mut cx) as usize;
 
-    // For now, return a placeholder response
-    Ok(cx.string("👍"))
+            for i in 0..context_length.min(10) { // Limit to last 10 messages for context
+                if let Ok(message_obj) = context_array.get(&mut cx, i as u32) {
+                    if let Ok(message_obj) = message_obj.downcast::<JsObject, _>(&mut cx) {
+                        // Extract role and content from message object
+                        if let (Ok(role_val), Ok(content_val)) = (
+                            message_obj.get(&mut cx, "role"),
+                            message_obj.get(&mut cx, "content")
+                        ) {
+                            if let (Ok(role), Ok(content)) = (
+                                role_val.downcast::<JsString, _>(&mut cx),
+                                content_val.downcast::<JsString, _>(&mut cx)
+                            ) {
+                                let role_str = role.value(&mut cx);
+                                let content_str = content.value(&mut cx);
+                                context_messages.push(format!("<|{}|> {}", role_str, content_str));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Build conversation context for mention response
+            let mut conversation_context = String::new();
+
+            // Add recent context messages
+            if !context_messages.is_empty() {
+                conversation_context.push_str(&context_messages.join("\n"));
+                conversation_context.push('\n');
+            }
+
+            // Add the current message being responded to
+            conversation_context.push_str(&format!("<|user|> {}: {}\n", author_name, message_content));
+
+            // Add assistant prompt for response generation
+            conversation_context.push_str("<|assistant|>");
+
+            // Generate contextual response with appropriate parameters
+            match service.generate(&conversation_context, 60, 0.8) {
+                Ok(generated_response) => {
+                    // Clean up the response (remove any unwanted tokens or formatting)
+                    let clean_response = generated_response
+                        .trim()
+                        .replace("<|assistant|>", "")
+                        .replace("<|user|>", "")
+                        .replace("<|system|>", "")
+                        .trim()
+                        .to_string();
+
+                    // Ensure we have a reasonable response
+                    let final_response = if clean_response.is_empty() || clean_response.len() < 2 {
+                        "I understand!".to_string()
+                    } else {
+                        clean_response
+                    };
+
+                    tracing::info!("Generated mention response: \"{}\"", final_response);
+                    Ok(cx.string(final_response))
+                }
+                Err(e) => {
+                    tracing::error!("Mention response generation failed: {}", e);
+                    Ok(cx.string(format!("Error generating response: {}", e)))
+                }
+            }
+        }
+        None => {
+            tracing::warn!("No model loaded for mention response generation");
+            Ok(cx.string("Error: No model loaded. Call loadModel() first."))
+        }
+    }
 }
 
 // Training functions (Burn-based)
