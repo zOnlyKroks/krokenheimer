@@ -111,12 +111,12 @@ fn generate_mention_response(mut cx: FunctionContext) -> JsResult<JsString> {
             let context_length = context_array.len(&mut cx) as usize;
 
             for i in 0..context_length.min(10) { // Limit to last 10 messages for context
-                if let Ok(message_obj) = context_array.get(&mut cx, i as u32) {
-                    if let Ok(message_obj) = message_obj.downcast::<JsObject, _>(&mut cx) {
+                if let Ok(message_value) = context_array.get::<JsValue, _, _>(&mut cx, i as u32) {
+                    if let Ok(message_obj) = message_value.downcast::<JsObject, _>(&mut cx) {
                         // Extract role and content from message object
                         if let (Ok(role_val), Ok(content_val)) = (
-                            message_obj.get(&mut cx, "role"),
-                            message_obj.get(&mut cx, "content")
+                            message_obj.get::<JsValue, _, _>(&mut cx, "role"),
+                            message_obj.get::<JsValue, _, _>(&mut cx, "content")
                         ) {
                             if let (Ok(role), Ok(content)) = (
                                 role_val.downcast::<JsString, _>(&mut cx),

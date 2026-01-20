@@ -295,7 +295,7 @@ impl SimpleBurnService {
         tracing::info!("Starting REAL model training with {} batches", training_batches.len());
 
         // Convert model to autodiff for training
-        let autodiff_device = Autodiff::new(self.device.clone());
+        let autodiff_device = <AutodiffNdArray as Backend>::Device::default();
         let mut model = TransformerLanguageModel::new(&self.config, &autodiff_device);
 
         // Initialize REAL optimizer
@@ -352,8 +352,9 @@ impl SimpleBurnService {
                 // BACKWARD PASS - compute gradients
                 let grads = loss.backward();
 
-                // PARAMETER UPDATE - actual learning with scheduled learning rate!
-                model = optimizer.step(learning_rate, model, grads);
+                // PARAMETER UPDATE - extract gradients for the model parameters
+                let param_grads = grads.grads(&model);
+                model = optimizer.step(learning_rate, model, param_grads);
 
                 // Log with real loss values and learning rate
                 if batch_idx % 5 == 0 || batch_idx < 10 {
@@ -671,13 +672,13 @@ impl SimpleBurnService {
             data[i] = fastrand::f32() * 0.01; // Small random values
         }
 
-        Ok(Tensor::from_data(data.as_slice(), &self.device).reshape(shape))
+        Ok(Tensor::<NdArray, 3>::from_data(data.as_slice(), &self.device).reshape(shape))
     }
 
     fn convert_to_autodiff(&self, tensor: &Tensor<NdArray, 2, Int>) -> Result<Tensor<AutodiffNdArray, 2, Int>> {
         // Convert NdArray tensor to Autodiff<NdArray> tensor
         let data = tensor.clone().into_data();
-        let autodiff_device = Autodiff::new(self.device.clone());
+        let autodiff_device = <AutodiffNdArray as Backend>::Device::default();
         Ok(Tensor::<AutodiffNdArray, 2, Int>::from_data(data, &autodiff_device))
     }
 
@@ -696,15 +697,29 @@ impl SimpleBurnService {
 
     fn extract_loss_value(&self, loss: &Tensor<AutodiffNdArray, 1>) -> f32 {
         // Extract scalar loss value for logging by converting to inner backend first
-        let loss_inner = loss.inner();
+        let loss_inner = loss.clone().inner();
         let loss_data = loss_inner.into_data();
         loss_data.as_slice::<f32>().map(|s| s[0]).unwrap_or(0.0)
     }
 
     fn convert_to_inference_model(&self, trained_model: &TransformerLanguageModel<AutodiffNdArray>) -> Result<TransformerLanguageModel<NdArray>> {
-        // Save the trained model to a record format and load it back as inference model
+        // Properly convert trained autodiff model to inference model preserving weights
+        // Use Burn's Module trait to convert between backends via serialization
+        use burn::record::{FullPrecisionSettings, Recorder};
+
+        let recorder = CompactRecorder::new();
+
+        // Save the trained model to bytes
         let record = trained_model.clone().into_record();
+        let mut bytes = Vec::new();
+        recorder.record(record, &mut bytes)
+            .map_err(|e| anyhow!("Failed to serialize trained model: {}", e))?;
+
+        // Load into inference model
         let inference_model = TransformerLanguageModel::new(&self.config, &self.device);
+        let record = recorder.load(&mut bytes.as_slice(), &self.device)
+            .map_err(|e| anyhow!("Failed to deserialize model for inference: {}", e))?;
+
         Ok(inference_model.load_record(record))
     }
 
