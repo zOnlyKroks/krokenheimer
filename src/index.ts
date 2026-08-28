@@ -7,11 +7,8 @@ import { BioinformaticsPlugin } from "./plugins/BioinformaticsPlugin.js";
 import { CalculatorPlugin } from "./plugins/CalculatorPlugin.js";
 import { ASCIIArtPlugin } from "./plugins/ASCIIArtPlugin.js";
 import { DownCheckerPlugin } from "./plugins/DownCheckerPlugin.js";
-import { LLMPlugin } from "./plugins/LLMPlugin.js";
 import type { BotConfig } from "./types/index.ts";
 
-// Only load .env file if it exists (for local development)
-// In Docker, environment variables are passed directly
 if (existsSync('.env')) {
   dotenv.config();
 } else {
@@ -46,7 +43,6 @@ async function main() {
     await bot.loadPlugin(new CalculatorPlugin());
     await bot.loadPlugin(new ASCIIArtPlugin());
     await bot.loadPlugin(new DownCheckerPlugin());
-    await bot.loadPlugin(new LLMPlugin());
 
     await bot.start();
 

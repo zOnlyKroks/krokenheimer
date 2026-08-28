@@ -136,8 +136,8 @@ export class SequenceDetector {
     extractContinuousSequences(text) {
         const sequences = [];
         const cleanText = text.toUpperCase();
-        // Look for continuous ATCG patterns (including IUPAC codes)
-        const dnaPattern = /[ATCGWSMKRYBDHVN]{4,}/g;
+        // Look for continuous ATCG/RNA patterns (including IUPAC codes)
+        const dnaPattern = /[ATCGUWSMKRYBDHVN]{4,}/g;
         let match;
         while ((match = dnaPattern.exec(cleanText)) !== null) {
             const seq = match[0];
@@ -157,7 +157,7 @@ export class SequenceDetector {
         const cleanText = text.toUpperCase();
         let count = 0;
         for (const char of cleanText) {
-            if (['A', 'T', 'C', 'G'].includes(char)) {
+            if (['A', 'T', 'C', 'G', 'U'].includes(char)) {
                 count++;
             }
         }
@@ -167,7 +167,7 @@ export class SequenceDetector {
      * Create a DNASequence object with calculated properties
      */
     createDNASequence(sequence, sourceText, method) {
-        const cleaned = sequence.toUpperCase().replace(/[^ATCG]/g, '');
+        const cleaned = sequence.toUpperCase().replace(/[^ATCGU]/g, '');
         const gcContent = this.calculateGCContent(cleaned);
         const confidence = this.calculateExtractionConfidence(cleaned, sourceText, method);
         return {
@@ -267,7 +267,7 @@ export class SequenceDetector {
             return false;
         // Check for simple repeats (AA, AAAA, etc.)
         const simpleRepeats = [
-            /A{4,}/, /T{4,}/, /C{4,}/, /G{4,}/, // Single base repeats
+            /A{4,}/, /T{4,}/, /C{4,}/, /G{4,}/, /U{4,}/, // Single base repeats
             /(AT){3,}/, /(TA){3,}/, /(GC){3,}/, /(CG){3,}/ // Dinucleotide repeats
         ];
         return simpleRepeats.some(pattern => pattern.test(sequence));
@@ -332,8 +332,8 @@ export class SequenceDetector {
     isLikelyFalsePositive(sequence) {
         // Common false positives
         const falsePositives = [
-            /^[ATCG]{1,3}$/, // Too short to be meaningful
-            /AAAA+|TTTT+|CCCC+|GGGG+/, // Simple repeats
+            /^[ATCGU]{1,3}$/, // Too short to be meaningful
+            /AAAA+|TTTT+|CCCC+|GGGG+|UUUU+/, // Simple repeats
         ];
         return falsePositives.some(pattern => pattern.test(sequence));
     }

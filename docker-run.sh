@@ -50,7 +50,6 @@ docker run -d \
     -e LLM_MAX_INTERVAL_MINUTES="${LLM_MAX_INTERVAL_MINUTES:-180}" \
     -e LLM_SCAN_INTERVAL_MINUTES="${LLM_SCAN_INTERVAL_MINUTES:-2}" \
     -v "$(pwd)/data:/app/data" \
-    -v "$(pwd)/chroma_data:/app/chroma_data" \
     krokenheimer-bot
 
 if [ $? -eq 0 ]; then

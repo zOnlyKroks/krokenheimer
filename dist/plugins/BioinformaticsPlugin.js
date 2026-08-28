@@ -10,50 +10,58 @@ export class BioinformaticsPlugin {
     sequenceDetector = new SequenceDetector();
     blastClient = new BlastApiClient();
     logger = new Logger();
+    // Serializes BLAST analyses so concurrent messages don't fire off multiple
+    // simultaneous long-running NCBI/EBI polls, which can exhaust memory/sockets.
+    analysisQueue = Promise.resolve();
     // Analysis options
     analysisOptions = {
         minSequenceLength: 8,
         maxSequenceLength: 5000,
         enableCaching: true,
         enableRateLimit: true,
-        extractionMethods: ['sequential', 'word-based', 'continuous'],
+        extractionMethods: ["sequential", "word-based", "continuous"],
         gcContentRange: [15, 85],
-        requiredComplexity: 0.3
+        requiredComplexity: 0.3,
     };
     commands = [
         {
+            name: "analyze",
+            description: "Manually analyze a DNA/RNA sequence",
+            execute: this.manualAnalyze.bind(this),
+        },
+        {
             name: "biostats",
             description: "Show analysis statistics (admin only)",
-            execute: this.showStats.bind(this)
+            execute: this.showStats.bind(this),
         },
         {
             name: "alias",
             description: "Manage character aliases for DNA sequence processing",
-            execute: this.manageAliases.bind(this)
-        }
+            execute: this.manageAliases.bind(this),
+        },
     ];
     async initialize(client, bot) {
         client.on("messageCreate", (message) => {
             if (Math.random() <= 0.1) {
-                this.scanMessage(message).catch(error => {
-                    this.logger.error('Error in message scanning:', error);
+                this.scanMessage(message).catch((error) => {
+                    this.logger.error("Error in message scanning:", error);
                 });
             }
         });
-        this.logger.info('BioinformaticsPlugin initialized - automatic DNA sequence detection active');
+        this.logger.info("BioinformaticsPlugin initialized - automatic DNA sequence detection active");
     }
     async cleanup() {
-        this.logger.info('BioinformaticsPlugin cleanup completed');
+        this.logger.info("BioinformaticsPlugin cleanup completed");
     }
     async scanMessage(message) {
-        if (message.author.bot || message.content.startsWith('!'))
+        if (message.author.bot || message.content.startsWith("!"))
             return;
         const context = {
             userId: message.author.id,
             channelId: message.channel.id,
             guildId: message.guild?.id,
             messageId: message.id,
-            timestamp: message.createdTimestamp
+            timestamp: message.createdTimestamp,
         };
         try {
             const extractionResult = this.sequenceDetector.extractSequencesFromMessage(message.content, this.analysisOptions);
@@ -63,11 +71,15 @@ export class BioinformaticsPlugin {
                 return;
             // Only process the best sequence automatically
             const bestSequence = extractionResult.sequences.sort((a, b) => b.length - a.length)[0];
+            // Queue the heavy BLAST analysis instead of running it concurrently
+            // with any other in-flight analysis.
+            this.analysisQueue = this.analysisQueue.then(() => 
             // @ts-ignore
-            await this.processSequence(bestSequence, message, context);
+            this.processSequence(bestSequence, message, context));
+            await this.analysisQueue;
         }
         catch (error) {
-            this.logger.error('Error in automatic sequence scanning:', error);
+            this.logger.error("Error in automatic sequence scanning:", error);
         }
     }
     async processSequence(sequence, message, context) {
@@ -86,21 +98,22 @@ export class BioinformaticsPlugin {
                 await notificationMsg.edit({ embeds: [finalEmbed] });
             }
             catch (error) {
-                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                const errorMessage = error instanceof Error ? error.message : "Unknown error";
                 // Log error instead of sending Discord message
                 this.logger.error(`[BIOINFORMATICS] Automatic analysis failed for ${sequence.cleaned?.length || sequence.raw?.length}bp sequence:`, {
                     error: errorMessage,
-                    sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                    sequence: sequence.cleaned?.substring(0, 50) ||
+                        sequence.raw?.substring(0, 50),
                     method: sequence.extractionMethod,
-                    user: context.userId || 'unknown',
-                    channel: context.channelId || 'unknown',
+                    user: context.userId || "unknown",
+                    channel: context.channelId || "unknown",
                 });
                 // Delete the notification message instead of showing error
                 try {
                     await notificationMsg.delete();
                 }
                 catch (deleteError) {
-                    this.logger.error('[BIOINFORMATICS] Failed to delete notification message:', deleteError);
+                    this.logger.error("[BIOINFORMATICS] Failed to delete notification message:", deleteError);
                 }
             }
         }
@@ -108,25 +121,26 @@ export class BioinformaticsPlugin {
             // Log all sequence processing errors without sending Discord messages
             this.logger.error(`[BIOINFORMATICS] Sequence processing error (automatic):`, {
                 error: error instanceof Error ? error.message : String(error),
-                sequence: sequence.cleaned?.substring(0, 50) || sequence.raw?.substring(0, 50),
+                sequence: sequence.cleaned?.substring(0, 50) ||
+                    sequence.raw?.substring(0, 50),
                 sequenceLength: sequence.cleaned?.length || sequence.raw?.length,
                 method: sequence.extractionMethod,
-                user: context.userId || 'unknown',
-                channel: context.channelId || 'unknown'
+                user: context.userId || "unknown",
+                channel: context.channelId || "unknown",
             });
         }
     }
     async analyzeSequence(sequence, context) {
         const startTime = Date.now();
         const blastResults = await this.blastClient.analyzeSequence(sequence);
-        const topMatches = blastResults.hits.slice(0, 1).map(hit => ({
+        const topMatches = blastResults.hits.slice(0, 1).map((hit) => ({
             species: hit.scientificName,
             commonName: hit.commonName,
             confidence: this.calculateMatchConfidence(hit),
             identity: hit.identity,
             eValue: hit.eValue,
             description: hit.description,
-            taxonId: hit.taxonId
+            taxonId: hit.taxonId,
         }));
         const confidence = this.calculateOverallConfidence(sequence, blastResults, topMatches);
         return {
@@ -134,7 +148,7 @@ export class BioinformaticsPlugin {
             blastResults,
             topMatches,
             confidence,
-            processingTime: Date.now() - startTime
+            processingTime: Date.now() - startTime,
         };
     }
     calculateMatchConfidence(hit) {
@@ -180,48 +194,57 @@ export class BioinformaticsPlugin {
         overall += sequenceValidity;
         let level;
         if (overall >= 80)
-            level = 'very-high';
+            level = "very-high";
         else if (overall >= 65)
-            level = 'high';
+            level = "high";
         else if (overall >= 45)
-            level = 'medium';
+            level = "medium";
         else if (overall >= 25)
-            level = 'low';
+            level = "low";
         else
-            level = 'very-low';
-        return { overall: Math.min(100, overall), extractionQuality, blastReliability, sequenceValidity, level };
+            level = "very-low";
+        return {
+            overall: Math.min(100, overall),
+            extractionQuality,
+            blastReliability,
+            sequenceValidity,
+            level,
+        };
     }
     async manualAnalyze(message, args) {
         if (args.length === 0) {
             await message.reply("❌ Please provide a DNA sequence to analyze.\nUsage: `!analyze ATCGATCGATCG`");
             return;
         }
-        const sequenceText = args.join('').toUpperCase().replace(/[^ATCGWSMKRYBDHVN]/g, '');
+        const sequenceText = args
+            .join("")
+            .toUpperCase()
+            .replace(/[^ATCGUWSMKRYBDHVN]/g, "");
         if (sequenceText.length < this.analysisOptions.minSequenceLength) {
             await message.reply(`❌ Sequence too short. Minimum length is ${this.analysisOptions.minSequenceLength} nucleotides.`);
             return;
         }
         const sequence = {
             raw: sequenceText,
-            cleaned: sequenceText.replace(/[^ATCG]/g, ''),
+            cleaned: sequenceText.replace(/[^ATCGU]/g, ""),
             length: sequenceText.length,
             gcContent: this.calculateGCContent(sequenceText),
             isValid: true,
-            extractionMethod: 'continuous',
+            extractionMethod: "continuous",
             sourceText: message.content,
-            confidence: 0.9
+            confidence: 0.9,
         };
         const context = {
             userId: message.author.id,
             channelId: message.channel.id,
             guildId: message.guild?.id,
             messageId: message.id,
-            timestamp: message.createdTimestamp
+            timestamp: message.createdTimestamp,
         };
         await this.processSequence(sequence, message, context);
     }
     async showStats(message) {
-        if (!message.member?.permissions.has('Administrator')) {
+        if (!message.member?.permissions.has("Administrator")) {
             await message.reply("❌ This command requires administrator permissions.");
             return;
         }
@@ -233,9 +256,9 @@ export class BioinformaticsPlugin {
                 name: "🔧 Settings",
                 value: `**Min Length**: ${this.analysisOptions.minSequenceLength} bp\n` +
                     `**Max Length**: ${this.analysisOptions.maxSequenceLength} bp\n` +
-                    `**Methods**: ${this.analysisOptions.extractionMethods.join(', ')}`,
-                inline: true
-            }
+                    `**Methods**: ${this.analysisOptions.extractionMethods.join(", ")}`,
+                inline: true,
+            },
         ])
             .setFooter({ text: `Generated at ${new Date().toLocaleString()}` });
         await message.reply({ embeds: [embed] });
@@ -255,7 +278,7 @@ export class BioinformaticsPlugin {
                         "!alias list                      - Show all current aliases\n" +
                         "!alias reset                     - Reset to default aliases\n" +
                         "```",
-                    inline: false
+                    inline: false,
                 },
                 {
                     name: "Examples",
@@ -264,10 +287,12 @@ export class BioinformaticsPlugin {
                         "!alias set ø o       - Maps ø to o\n" +
                         "!alias remove ä      - Removes ä mapping\n" +
                         "```",
-                    inline: false
-                }
+                    inline: false,
+                },
             ])
-                .setFooter({ text: "Character aliases help improve DNA sequence detection from text containing accented characters." });
+                .setFooter({
+                text: "Character aliases help improve DNA sequence detection from text containing accented characters.",
+            });
             await message.reply({ embeds: [helpEmbed] });
             return;
         }
@@ -275,16 +300,16 @@ export class BioinformaticsPlugin {
             throw Error("Args0 empty!");
         const subcommand = args[0].toLowerCase();
         switch (subcommand) {
-            case 'set':
+            case "set":
                 await this.setAlias(message, args.slice(1));
                 break;
-            case 'remove':
+            case "remove":
                 await this.removeAlias(message, args.slice(1));
                 break;
-            case 'list':
+            case "list":
                 await this.listAliases(message);
                 break;
-            case 'reset':
+            case "reset":
                 await this.resetAliases(message);
                 break;
             default:
@@ -309,7 +334,7 @@ export class BioinformaticsPlugin {
             return;
         }
         // Prevent replacing standard DNA bases
-        if (['A', 'T', 'C', 'G', 'a', 't', 'c', 'g'].includes(fromChar)) {
+        if (["A", "T", "C", "G", "a", "t", "c", "g"].includes(fromChar)) {
             await message.reply("❌ Cannot create aliases for standard DNA bases (A, T, C, G).");
             return;
         }
@@ -322,8 +347,8 @@ export class BioinformaticsPlugin {
             {
                 name: "Example",
                 value: `Text containing "${fromChar}" → Processed as "${toReplacement}"`,
-                inline: false
-            }
+                inline: false,
+            },
         ])
             .setTimestamp();
         await message.reply({ embeds: [embed] });
@@ -363,20 +388,67 @@ export class BioinformaticsPlugin {
             "German Umlauts": [],
             "Accented Vowels": [],
             "Other Characters": [],
-            "Custom": []
+            Custom: [],
         };
         const defaultAliases = new Set([
-            'ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü', 'à', 'á', 'â', 'ã', 'å', 'À', 'Á', 'Â', 'Ã', 'Å',
-            'è', 'é', 'ê', 'ë', 'È', 'É', 'Ê', 'Ë', 'ì', 'í', 'î', 'ï', 'Ì', 'Í', 'Î', 'Ï',
-            'ò', 'ó', 'ô', 'õ', 'Ò', 'Ó', 'Ô', 'Õ', 'ù', 'ú', 'û', 'Ù', 'Ú', 'Û',
-            'ç', 'Ç', 'ñ', 'Ñ', 'ß'
+            "ä",
+            "ö",
+            "ü",
+            "Ä",
+            "Ö",
+            "Ü",
+            "à",
+            "á",
+            "â",
+            "ã",
+            "å",
+            "À",
+            "Á",
+            "Â",
+            "Ã",
+            "Å",
+            "è",
+            "é",
+            "ê",
+            "ë",
+            "È",
+            "É",
+            "Ê",
+            "Ë",
+            "ì",
+            "í",
+            "î",
+            "ï",
+            "Ì",
+            "Í",
+            "Î",
+            "Ï",
+            "ò",
+            "ó",
+            "ô",
+            "õ",
+            "Ò",
+            "Ó",
+            "Ô",
+            "Õ",
+            "ù",
+            "ú",
+            "û",
+            "Ù",
+            "Ú",
+            "Û",
+            "ç",
+            "Ç",
+            "ñ",
+            "Ñ",
+            "ß",
         ]);
         for (const [from, to] of aliases.entries()) {
             const aliasStr = `${from} → ${to}`;
             if (!defaultAliases.has(from)) {
                 aliasGroups["Custom"].push(aliasStr);
             }
-            else if (['ä', 'ö', 'ü', 'Ä', 'Ö', 'Ü', 'ß'].includes(from)) {
+            else if (["ä", "ö", "ü", "Ä", "Ö", "Ü", "ß"].includes(from)) {
                 aliasGroups["German Umlauts"].push(aliasStr);
             }
             else if (/[àáâãåÀÁÂÃÅèéêëÈÉÊËìíîïÌÍÎÏòóôõÒÓÔÕùúûÙÚÛ]/.test(from)) {
@@ -389,7 +461,7 @@ export class BioinformaticsPlugin {
         const embed = new EmbedBuilder()
             .setTitle("📝 Character Aliases")
             .setColor(0x0099ff)
-            .setDescription(`${aliases.size} character alias${aliases.size === 1 ? '' : 'es'} configured`)
+            .setDescription(`${aliases.size} character alias${aliases.size === 1 ? "" : "es"} configured`)
             .setTimestamp();
         for (const [groupName, groupAliases] of Object.entries(aliasGroups)) {
             if (groupAliases.length > 0) {
@@ -399,19 +471,23 @@ export class BioinformaticsPlugin {
                     chunks.push(groupAliases.slice(i, i + 20));
                 }
                 chunks.forEach((chunk, index) => {
-                    const name = chunks.length === 1 ? groupName : `${groupName} (${index + 1}/${chunks.length})`;
-                    embed.addFields([{
+                    const name = chunks.length === 1
+                        ? groupName
+                        : `${groupName} (${index + 1}/${chunks.length})`;
+                    embed.addFields([
+                        {
                             name: name,
-                            value: "```\n" + chunk.join('\n') + "\n```",
-                            inline: true
-                        }]);
+                            value: "```\n" + chunk.join("\n") + "\n```",
+                            inline: true,
+                        },
+                    ]);
                 });
             }
         }
         await message.reply({ embeds: [embed] });
     }
     async resetAliases(message) {
-        if (!message.member?.permissions.has('Administrator')) {
+        if (!message.member?.permissions.has("Administrator")) {
             await message.reply("❌ This command requires administrator permissions.");
             return;
         }
@@ -426,8 +502,8 @@ export class BioinformaticsPlugin {
                 value: "• German umlauts (ä→ae, ö→oe, ü→ue)\n" +
                     "• Accented vowels (á→a, é→e, í→i, etc.)\n" +
                     "• Common special characters (ç→c, ñ→n, ß→ss)",
-                inline: false
-            }
+                inline: false,
+            },
         ])
             .setFooter({ text: "Use !alias list to see all default aliases" })
             .setTimestamp();

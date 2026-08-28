@@ -16,18 +16,7 @@ RUN apt-get update && apt-get install -y \
     sqlite3 \
     supervisor \
     net-tools \
-    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
-
-# Install ChromaDB
-RUN python3 -m venv /opt/chromadb-venv && \
-    /opt/chromadb-venv/bin/pip install --no-cache-dir chromadb
-
-# ChromaDB runner
-RUN /opt/chromadb-venv/bin/python -c "import chromadb; print('ChromaDB import successful')" && \
-    echo '#!/bin/bash' > /usr/local/bin/run-chromadb && \
-    echo 'exec /opt/chromadb-venv/bin/chroma run --host 0.0.0.0 --port 8000 --path "$1"' >> /usr/local/bin/run-chromadb && \
-    chmod +x /usr/local/bin/run-chromadb
 
 # Create /app directory BEFORE trying to symlink to it
 RUN mkdir -p /app
@@ -87,16 +76,11 @@ RUN echo "🔨 Building TypeScript..." && \
 
 RUN npm prune --production
 
-RUN mkdir -p /app/data /app/chroma_data /app/data/models /app/data/checkpoints /var/log/supervisor
+RUN mkdir -p /app/data /app/data/models /app/data/checkpoints /var/log/supervisor
 
 # Make training scripts executable
 RUN chmod +x /app/scripts/*.py /app/scripts/*.sh || true
 
-COPY wait-for-chromadb.sh /usr/local/bin/wait-for-chromadb.sh
-RUN chmod +x /usr/local/bin/wait-for-chromadb.sh
-
 COPY docker-supervisord.conf /etc/supervisor/supervisord.conf
-
-EXPOSE 8000
 
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/supervisord.conf"]

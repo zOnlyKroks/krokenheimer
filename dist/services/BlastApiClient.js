@@ -6,10 +6,10 @@ export class BlastApiClient {
        ====================================================================== */
     async analyzeSequence(sequence) {
         const seq = sequence.cleaned || sequence.raw;
-        // Validate DNA sequence
-        const validDNA = /^[ATCGNatcgn]+$/i.test(seq);
+        // Validate DNA/RNA sequence
+        const validDNA = /^[ATCGUNatcgun]+$/i.test(seq);
         if (!validDNA) {
-            throw new Error(`Invalid DNA sequence. Only A, T, C, G, N allowed`);
+            throw new Error(`Invalid DNA/RNA sequence. Only A, T, C, G, U, N allowed`);
         }
         // Warn about short sequences
         if (seq.length < 50) {
