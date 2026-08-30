@@ -16,7 +16,7 @@ export class LLMPlugin implements BotPlugin {
   private isTraining: boolean = false;
 
   constructor() {
-    const baseModel = process.env.LLM_BASE_MODEL || 'phi3:mini';
+    const baseModel = process.env.LLM_BASE_MODEL || 'gemma2:2b';
     const customModelName = process.env.LLM_CUSTOM_MODEL || 'discord-bot-custom';
     const ollamaHost = process.env.OLLAMA_HOST || 'http://localhost:11434';
     const responseChance = parseFloat(process.env.LLM_RANDOM_CHANCE || '0.05'); // 5% default

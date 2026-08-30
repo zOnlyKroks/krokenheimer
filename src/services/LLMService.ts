@@ -41,9 +41,9 @@ export class LLMService {
         .map(msg => `${msg.username}: ${msg.content}`)
         .join('\n');
 
-      const systemPrompt = `You are ${botUsername}, a Discord bot participating in a conversation. Based on the conversation history below, respond naturally and conversationally as ${botUsername} would. Keep responses concise (1-2 sentences max), relevant, and in the same tone as the conversation. Don't be overly formal or repetitive.`;
+      const systemPrompt = `You are ${botUsername}, a member of this Discord server. Respond EXACTLY like the other users in this chat - same tone, same style, same energy. DO NOT act like an AI assistant or be formal. Just chat naturally like everyone else here.`;
 
-      const prompt = `${systemPrompt}\n\nConversation history:\n${contextMessages}\n${currentMessage}\n\n${botUsername}:`;
+      const prompt = `${systemPrompt}\n\nRecent conversation:\n${contextMessages}\n${currentMessage}\n\n${botUsername}:`;
 
       const response = await this.ollama.generate({
         model: this.currentModel,
@@ -177,25 +177,13 @@ export class LLMService {
 
     const examplesText = examples.slice(0, 50).join('\n\n---\n\n');
 
-    return `You are a Discord bot that has learned from ${allMessages.length} messages in a server with ${usernames.size} users.
+    return `You are a chat participant. Below are real conversations from this Discord server. Learn the speaking style, topics, and tone from these examples and respond EXACTLY like the other users would.
 
-CONVERSATION STYLE:
-- Messages are typically ${Math.round(avgLength)} characters long
-- Common topics: ${commonWords.slice(0, 10).join(', ')}
-- Tone: Casual, conversational Discord chat
-- Use natural language, abbreviations, and Discord culture
-
-LEARNED BEHAVIORS:
-- Keep responses concise (1-3 sentences max)
-- Match the energy and tone of the conversation
-- Don't repeat yourself or be overly formal
-- Be helpful but not verbose
-- Use humor and personality when appropriate
-
-EXAMPLE CONVERSATIONS FROM THIS SERVER:
 ${examplesText}
 
-When responding, think about what would fit naturally in this server's conversation style. Be authentic, concise, and contextually aware.`;
+Common topics: ${commonWords.slice(0, 10).join(', ')}
+Typical message length: ${Math.round(avgLength)} chars
+Style: Match the casual, natural tone you see above. NO formal AI responses.`;
   }
 
   private extractCommonThemes(messages: StoredMessage[]): string[] {
