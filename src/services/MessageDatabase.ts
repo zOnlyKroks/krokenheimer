@@ -75,17 +75,6 @@ export class MessageDatabase {
     stmt.run(messageId, guildId, channelId, userId, username, content, timestamp);
   }
 
-  public getRecentMessages(guildId: string, limit: number = 50): StoredMessage[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM messages
-      WHERE guildId = ?
-      ORDER BY timestamp DESC
-      LIMIT ?
-    `);
-
-    return stmt.all(guildId, limit) as StoredMessage[];
-  }
-
   public getChannelMessages(channelId: string, limit: number = 30): StoredMessage[] {
     const stmt = this.db.prepare(`
       SELECT * FROM messages
@@ -113,6 +102,15 @@ export class MessageDatabase {
 
     const result = stmt.get() as { count: number };
     return result.count;
+  }
+
+  public getAllMessages(): StoredMessage[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM messages
+      ORDER BY timestamp ASC
+    `);
+
+    return stmt.all() as StoredMessage[];
   }
 
   public close(): void {

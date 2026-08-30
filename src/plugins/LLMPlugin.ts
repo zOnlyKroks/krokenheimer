@@ -13,7 +13,6 @@ export class LLMPlugin implements BotPlugin {
   private llmService: LLMService;
   private client: Client | null = null;
   private randomResponseChance: number;
-  private isTraining: boolean = false;
 
   constructor() {
     const baseModel = process.env.LLM_BASE_MODEL || 'gemma2:2b';
@@ -33,11 +32,6 @@ export class LLMPlugin implements BotPlugin {
 
   commands: BotCommand[] = [
     {
-      name: "retrain",
-      description: "Fine-tune the bot with server messages",
-      execute: this.retrain.bind(this),
-    },
-    {
       name: "stats",
       description: "Show message learning statistics",
       aliases: ["llmstats"],
@@ -45,7 +39,7 @@ export class LLMPlugin implements BotPlugin {
     },
     {
       name: "scan",
-      description: "Scan historical messages from all servers",
+      description: "Scan and export messages to JSON file",
       aliases: ["rescan"],
       execute: this.scanCommand.bind(this),
     },
@@ -89,7 +83,7 @@ export class LLMPlugin implements BotPlugin {
     );
 
     const shouldRespond = this.shouldRespondToMessage(message);
-    if (shouldRespond && !this.isTraining) {
+    if (shouldRespond) {
       await this.generateAndSendResponse(message);
     }
   }
@@ -212,82 +206,6 @@ export class LLMPlugin implements BotPlugin {
     }
   }
 
-  private async retrain(message: Message): Promise<void> {
-    if (this.isTraining) {
-      await message.reply("⏳ Training is already in progress. Please wait.");
-      return;
-    }
-
-    if (!message.guild) {
-      await message.reply("❌ This command can only be used in a server.");
-      return;
-    }
-
-    try {
-      this.isTraining = true;
-
-      const totalMessages = this.messageDb.getTotalMessageCount();
-
-      if (totalMessages < 100) {
-        await message.reply(
-          `⚠️ Not enough messages to train. Current: ${totalMessages}, Required: 100+`
-        );
-        this.isTraining = false;
-        return;
-      }
-
-      await message.reply(
-        `This will take a LONG time (30-60 minutes or more on CPU). Check console for progress!`
-      );
-
-      // Import spawn from child_process
-      const { spawn } = await import('child_process');
-      const path = await import('path');
-
-      // Run the Python training script
-      const pythonScript = path.join(process.cwd(), 'scripts', 'train_model.py');
-
-      console.log(`\n${'='.repeat(60)}`);
-      console.log('STARTING REAL MODEL TRAINING');
-      console.log('This uses actual gradient descent to update model weights');
-      console.log('Check console output below for training progress');
-      console.log(`${'='.repeat(60)}\n`);
-
-      const pythonProcess = spawn('python3', [pythonScript], {
-        cwd: process.cwd(),
-        stdio: 'inherit' // Show output in console
-      });
-
-      pythonProcess.on('close', async (code) => {
-        if (code === 0) {
-          await message.reply(
-            `The model has actually learned from ${totalMessages} messages through gradient descent.`
-          );
-        } else {
-          await message.reply(
-            `Training failed with exit code ${code}. Check console for details.`
-          );
-        }
-        this.isTraining = false;
-      });
-
-      pythonProcess.on('error', async (error) => {
-        console.error('Failed to start training:', error);
-        await message.reply(
-          `Failed to start training: ${error.message}\n\nMake sure Python 3 and required packages are installed:\n\`cd scripts && pip install -r requirements.txt\``
-        );
-        this.isTraining = false;
-      });
-
-    } catch (error) {
-      console.error("Error during retraining:", error);
-      await message.reply(
-        `Training failed: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
-      this.isTraining = false;
-    }
-  }
-
   private async showStats(message: Message): Promise<void> {
     if (!message.guild) {
       await message.reply("This command can only be used in a server.");
@@ -295,39 +213,48 @@ export class LLMPlugin implements BotPlugin {
     }
 
     const messageCount = this.messageDb.getMessageCount(message.guild.id);
+    const totalMessages = this.messageDb.getTotalMessageCount();
     const randomChancePercent = (this.randomResponseChance * 100).toFixed(1);
 
     const statsText = `
 **📊 LLM Statistics**
 
-**Messages Stored:** ${messageCount}
+**Messages Stored (This Server):** ${messageCount}
+**Total Messages (All Servers):** ${totalMessages}
 **Random Response Chance:** ${randomChancePercent}%
-**Training Status:** ${this.isTraining ? "🔄 In Progress" : "✅ Ready"}
 
 The bot will respond when:
 • Mentioned or replied to
 • ${randomChancePercent}% random chance on any message
 
-Use \`!retrain\` to fine-tune with stored messages (min 100 messages)
-Use \`!scan\` to scan historical messages from all servers
+Use \`!scan\` to export messages to JSON for local training
     `;
 
     await message.reply(statsText);
   }
 
   private async scanCommand(message: Message): Promise<void> {
-    await message.reply("🔍 Starting manual message scan... This may take a while. Check console for progress.");
+    await message.reply("🔍 Starting message scan and export... This may take a while. Check console for progress.");
 
     try {
       const startTime = Date.now();
       await this.scanAllHistoricalMessages();
-      const duration = Math.round((Date.now() - startTime) / 1000);
 
+      // Export messages to JSON file
+      const fs = await import('fs');
+      const path = await import('path');
+
+      const exportPath = path.join(process.cwd(), 'data', 'messages_export.json');
+      const allMessages = this.messageDb.getAllMessages();
+
+      fs.writeFileSync(exportPath, JSON.stringify(allMessages, null, 2));
+
+      const duration = Math.round((Date.now() - startTime) / 1000);
       const totalMessages = this.messageDb.getTotalMessageCount();
       const guildMessages = message.guild ? this.messageDb.getMessageCount(message.guild.id) : 0;
 
       await message.reply(
-        `✅ Scan complete! Took ${duration} seconds.\n**Total messages:** ${totalMessages}\n**This server:** ${guildMessages}`
+        `✅ Scan complete! Took ${duration} seconds.\n**Total messages:** ${totalMessages}\n**This server:** ${guildMessages}\n\n📁 Exported to: \`data/messages_export.json\``
       );
     } catch (error) {
       console.error("Error during manual scan:", error);
