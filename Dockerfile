@@ -7,9 +7,6 @@ RUN apt-get update && apt-get install -y \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Ollama
-RUN curl -fsSL https://ollama.ai/install.sh | sh
-
 WORKDIR /app
 
 # Install Node dependencies
@@ -24,12 +21,6 @@ RUN npm run build && npm prune --production
 
 # Create data directories
 RUN mkdir -p /app/data /var/log/supervisor
-
-# Pull base model
-RUN ollama serve & \
-    sleep 5 && \
-    ollama pull gemma2:2b && \
-    pkill ollama || true
 
 # Supervisor config
 COPY docker-supervisord.conf /etc/supervisor/supervisord.conf
