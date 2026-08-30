@@ -57,6 +57,15 @@ export class LLMPlugin implements BotPlugin {
       client.on("messageCreate", async (message) => {
         await this.handleAllMessages(message);
       });
+
+      // Wait for the client to be ready, then scan historical messages
+      if (client.isReady()) {
+        await this.scanAllHistoricalMessages();
+      } else {
+        client.once("ready", async () => {
+          await this.scanAllHistoricalMessages();
+        });
+      }
     } catch (error) {
       console.error("Failed to initialize LLM plugin:", error);
       throw error;
@@ -109,6 +118,96 @@ export class LLMPlugin implements BotPlugin {
     }
 
     return false;
+  }
+
+  private async scanAllHistoricalMessages(): Promise<void> {
+    if (!this.client) return;
+
+    console.log("🔍 Starting historical message scan...");
+    let totalMessagesScanned = 0;
+    let totalChannelsScanned = 0;
+
+    try {
+      const guilds = this.client.guilds.cache;
+      console.log(`Found ${guilds.size} guild(s) to scan`);
+
+      for (const [guildId, guild] of guilds) {
+        console.log(`Scanning guild: ${guild.name} (${guildId})`);
+
+        const channels = guild.channels.cache.filter(
+          (channel) => channel.isTextBased() && !channel.isDMBased()
+        );
+
+        for (const [channelId, channel] of channels) {
+          if (!channel.isTextBased()) continue;
+
+          try {
+            console.log(`  Scanning channel: ${channel.name || channelId}`);
+            let messagesInChannel = 0;
+            let lastMessageId: string | undefined;
+            let hasMore = true;
+
+            while (hasMore) {
+              try {
+                // Fetch messages in batches of 100 (Discord API limit)
+                const options: any = { limit: 100 };
+                if (lastMessageId) {
+                  options.before = lastMessageId;
+                }
+
+                const messages = await channel.messages.fetch(options);
+
+                if (messages.size === 0) {
+                  hasMore = false;
+                  break;
+                }
+
+                // Store each message
+                for (const [msgId, msg] of messages) {
+                  if (msg.author.bot || !msg.content) continue;
+
+                  this.messageDb.storeMessage(
+                    msg.id,
+                    guildId,
+                    channelId,
+                    msg.author.id,
+                    msg.author.username,
+                    msg.content,
+                    msg.createdTimestamp
+                  );
+
+                  messagesInChannel++;
+                  totalMessagesScanned++;
+                }
+
+                // Get the last message ID for pagination
+                lastMessageId = messages.last()?.id;
+
+                // If we got fewer than 100 messages, we've reached the end
+                if (messages.size < 100) {
+                  hasMore = false;
+                }
+
+                // Add a small delay to avoid rate limiting
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+              } catch (channelError) {
+                console.error(`    Error fetching messages from channel ${channel.name}:`, channelError);
+                hasMore = false;
+              }
+            }
+
+            console.log(`    Scanned ${messagesInChannel} messages from ${channel.name}`);
+            totalChannelsScanned++;
+          } catch (channelError) {
+            console.error(`  Failed to scan channel ${channel.name}:`, channelError);
+          }
+        }
+      }
+
+      console.log(`✅ Historical scan complete! Scanned ${totalMessagesScanned} messages from ${totalChannelsScanned} channels across ${guilds.size} guilds.`);
+    } catch (error) {
+      console.error("Error during historical message scan:", error);
+    }
   }
 
   private async generateAndSendResponse(message: Message): Promise<void> {

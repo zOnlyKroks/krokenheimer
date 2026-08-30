@@ -45,6 +45,14 @@ export class MessageDatabase {
     `);
   }
 
+  public messageExists(messageId: string): boolean {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM messages WHERE messageId = ?
+    `);
+    const result = stmt.get(messageId) as { count: number };
+    return result.count > 0;
+  }
+
   public storeMessage(
     messageId: string,
     guildId: string,
@@ -54,6 +62,11 @@ export class MessageDatabase {
     content: string,
     timestamp: number
   ): void {
+    // Skip if message already exists to avoid duplicates
+    if (this.messageExists(messageId)) {
+      return;
+    }
+
     const stmt = this.db.prepare(`
       INSERT INTO messages (messageId, guildId, channelId, userId, username, content, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?)
