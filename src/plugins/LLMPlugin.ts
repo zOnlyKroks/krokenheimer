@@ -1,4 +1,4 @@
-import { Client, Message } from "discord.js";
+import { Client, Message, Collection, GuildTextBasedChannel } from "discord.js";
 import type { BotPlugin, BotCommand } from "../types/index.js";
 import type { ExtensibleBot } from "../core/Bot.js";
 import { MessageDatabase } from "../services/MessageDatabase.js";
@@ -141,8 +141,12 @@ export class LLMPlugin implements BotPlugin {
         for (const [channelId, channel] of channels) {
           if (!channel.isTextBased()) continue;
 
+          if (!('messages' in channel)) continue;
+
+          const textChannel = channel as GuildTextBasedChannel;
+
           try {
-            console.log(`  Scanning channel: ${channel.name || channelId}`);
+            console.log(`  Scanning channel: ${textChannel.name || channelId}`);
             let messagesInChannel = 0;
             let lastMessageId: string | undefined;
             let hasMore = true;
@@ -150,21 +154,20 @@ export class LLMPlugin implements BotPlugin {
             while (hasMore) {
               try {
                 // Fetch messages in batches of 100 (Discord API limit)
-                const options: any = { limit: 100 };
-                if (lastMessageId) {
-                  options.before = lastMessageId;
-                }
+                const fetchOptions = lastMessageId
+                  ? { limit: 100, before: lastMessageId }
+                  : { limit: 100 };
 
-                const messages = await channel.messages.fetch(options);
+                const fetchedMessages = await textChannel.messages.fetch(fetchOptions);
 
-                if (messages.size === 0) {
+                if (fetchedMessages.size === 0) {
                   hasMore = false;
                   break;
                 }
 
                 // Store each message
-                for (const [msgId, msg] of messages) {
-                  if (msg.author.bot || !msg.content) continue;
+                fetchedMessages.forEach((msg) => {
+                  if (msg.author.bot || !msg.content) return;
 
                   this.messageDb.storeMessage(
                     msg.id,
@@ -178,28 +181,28 @@ export class LLMPlugin implements BotPlugin {
 
                   messagesInChannel++;
                   totalMessagesScanned++;
-                }
+                });
 
                 // Get the last message ID for pagination
-                lastMessageId = messages.last()?.id;
+                lastMessageId = fetchedMessages.last()?.id;
 
                 // If we got fewer than 100 messages, we've reached the end
-                if (messages.size < 100) {
+                if (fetchedMessages.size < 100) {
                   hasMore = false;
                 }
 
                 // Add a small delay to avoid rate limiting
                 await new Promise((resolve) => setTimeout(resolve, 1000));
               } catch (channelError) {
-                console.error(`    Error fetching messages from channel ${channel.name}:`, channelError);
+                console.error(`    Error fetching messages from channel ${textChannel.name}:`, channelError);
                 hasMore = false;
               }
             }
 
-            console.log(`    Scanned ${messagesInChannel} messages from ${channel.name}`);
+            console.log(`    Scanned ${messagesInChannel} messages from ${textChannel.name}`);
             totalChannelsScanned++;
           } catch (channelError) {
-            console.error(`  Failed to scan channel ${channel.name}:`, channelError);
+            console.error(`  Failed to scan channel ${textChannel.name}:`, channelError);
           }
         }
       }
