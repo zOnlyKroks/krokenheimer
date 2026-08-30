@@ -59,12 +59,9 @@ export class LLMPlugin implements BotPlugin {
       await this.llmService.initializeModel();
       console.log("LLM plugin initialized successfully");
 
-      // Register message handler for all messages (not just commands)
       client.on("messageCreate", async (message) => {
         await this.handleAllMessages(message);
       });
-
-      // Wait for the client to be ready, then scan historical messages
       if (client.isReady()) {
         await this.scanAllHistoricalMessages();
       } else {
@@ -79,13 +76,8 @@ export class LLMPlugin implements BotPlugin {
   }
 
   private async handleAllMessages(message: Message): Promise<void> {
-    // Ignore bot messages
-    if (message.author.bot) return;
+    if (message.author.bot || !message.guild) return;
 
-    // Only handle guild messages
-    if (!message.guild) return;
-
-    // Store message in database
     this.messageDb.storeMessage(
       message.id,
       message.guild.id,
@@ -96,9 +88,7 @@ export class LLMPlugin implements BotPlugin {
       message.createdTimestamp
     );
 
-    // Determine if we should respond
     const shouldRespond = this.shouldRespondToMessage(message);
-
     if (shouldRespond && !this.isTraining) {
       await this.generateAndSendResponse(message);
     }
@@ -106,26 +96,10 @@ export class LLMPlugin implements BotPlugin {
 
   private shouldRespondToMessage(message: Message): boolean {
     if (!this.client?.user) return false;
-
-    // Don't respond to commands (messages starting with !)
     if (message.content.startsWith('!')) return false;
-
-    // Always respond if bot is mentioned
-    if (message.mentions.has(this.client.user.id)) {
-      return true;
-    }
-
-    // Don't randomly respond to short messages or URLs
-    if (message.content.length < 10 || message.content.startsWith('http')) {
-      return false;
-    }
-
-    // Random chance response
-    if (Math.random() < this.randomResponseChance) {
-      return true;
-    }
-
-    return false;
+    if (message.mentions.has(this.client.user.id)) return true;
+    if (message.content.length < 10 || message.content.startsWith('http')) return false;
+    return Math.random() < this.randomResponseChance;
   }
 
   private async scanAllHistoricalMessages(): Promise<void> {
@@ -161,7 +135,6 @@ export class LLMPlugin implements BotPlugin {
 
             while (hasMore) {
               try {
-                // Fetch messages in batches of 100 (Discord API limit)
                 const fetchOptions = lastMessageId
                   ? { limit: 100, before: lastMessageId }
                   : { limit: 100 };
@@ -173,7 +146,6 @@ export class LLMPlugin implements BotPlugin {
                   break;
                 }
 
-                // Store each message
                 fetchedMessages.forEach((msg) => {
                   if (msg.author.bot || !msg.content) return;
 
@@ -191,15 +163,12 @@ export class LLMPlugin implements BotPlugin {
                   totalMessagesScanned++;
                 });
 
-                // Get the last message ID for pagination
                 lastMessageId = fetchedMessages.last()?.id;
 
-                // If we got fewer than 100 messages, we've reached the end
                 if (fetchedMessages.size < 100) {
                   hasMore = false;
                 }
 
-                // Add a small delay to avoid rate limiting
                 await new Promise((resolve) => setTimeout(resolve, 1000));
               } catch (channelError) {
                 console.error(`    Error fetching messages from channel ${textChannel.name}:`, channelError);
@@ -223,14 +192,9 @@ export class LLMPlugin implements BotPlugin {
 
   private async generateAndSendResponse(message: Message): Promise<void> {
     try {
-      // Get recent channel messages for context
       const recentMessages = this.messageDb.getChannelMessages(message.channelId, 20);
+      if (recentMessages.length === 0) return;
 
-      if (recentMessages.length === 0) {
-        return; // Need some context
-      }
-
-      // Show typing indicator
       if ('sendTyping' in message.channel) {
         await message.channel.sendTyping();
       }
@@ -242,11 +206,9 @@ export class LLMPlugin implements BotPlugin {
         botUsername
       );
 
-      // Send response
       await message.reply(response);
     } catch (error) {
       console.error("Error generating LLM response:", error);
-      // Silently fail - don't spam errors in chat
     }
   }
 
@@ -263,44 +225,72 @@ export class LLMPlugin implements BotPlugin {
 
     try {
       this.isTraining = true;
-      const guildId = message.guild.id;
 
-      const messageCount = this.messageDb.getMessageCount(guildId);
+      const totalMessages = this.messageDb.getTotalMessageCount();
 
-      if (messageCount < 100) {
+      if (totalMessages < 100) {
         await message.reply(
-          `⚠️ Not enough messages to train. Current: ${messageCount}, Required: 100+`
+          `⚠️ Not enough messages to train. Current: ${totalMessages}, Required: 100+`
         );
         this.isTraining = false;
         return;
       }
 
       await message.reply(
-        `🔄 Starting training with ${messageCount} messages... This may take a few minutes.`
+        `This will take a LONG time (30-60 minutes or more on CPU). Check console for progress!`
       );
 
-      // Get all messages for training
-      const allMessages = this.messageDb.getRecentMessages(guildId, 10000);
+      // Import spawn from child_process
+      const { spawn } = await import('child_process');
+      const path = await import('path');
 
-      // Fine-tune the model
-      await this.llmService.fineTuneModel(allMessages, guildId);
+      // Run the Python training script
+      const pythonScript = path.join(process.cwd(), 'scripts', 'train_model.py');
 
-      await message.reply(
-        `✅ Training complete! The bot has learned from ${allMessages.length} messages.`
-      );
+      console.log(`\n${'='.repeat(60)}`);
+      console.log('STARTING REAL MODEL TRAINING');
+      console.log('This uses actual gradient descent to update model weights');
+      console.log('Check console output below for training progress');
+      console.log(`${'='.repeat(60)}\n`);
+
+      const pythonProcess = spawn('python3', [pythonScript], {
+        cwd: process.cwd(),
+        stdio: 'inherit' // Show output in console
+      });
+
+      pythonProcess.on('close', async (code) => {
+        if (code === 0) {
+          await message.reply(
+            `The model has actually learned from ${totalMessages} messages through gradient descent.`
+          );
+        } else {
+          await message.reply(
+            `Training failed with exit code ${code}. Check console for details.`
+          );
+        }
+        this.isTraining = false;
+      });
+
+      pythonProcess.on('error', async (error) => {
+        console.error('Failed to start training:', error);
+        await message.reply(
+          `Failed to start training: ${error.message}\n\nMake sure Python 3 and required packages are installed:\n\`cd scripts && pip install -r requirements.txt\``
+        );
+        this.isTraining = false;
+      });
+
     } catch (error) {
       console.error("Error during retraining:", error);
       await message.reply(
-        `❌ Training failed: ${error instanceof Error ? error.message : "Unknown error"}`
+        `Training failed: ${error instanceof Error ? error.message : "Unknown error"}`
       );
-    } finally {
       this.isTraining = false;
     }
   }
 
   private async showStats(message: Message): Promise<void> {
     if (!message.guild) {
-      await message.reply("❌ This command can only be used in a server.");
+      await message.reply("This command can only be used in a server.");
       return;
     }
 
