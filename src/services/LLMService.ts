@@ -69,51 +69,22 @@ export class LLMService {
 
       // Format messages as training data
       const trainingData = this.formatMessagesForTraining(messages);
-      const trainingFilePath = join(dataDir, `training_${guildId}_${Date.now()}.txt`);
-      writeFileSync(trainingFilePath, trainingData);
-
-      // Create Modelfile for fine-tuning
-      const modelfilePath = join(dataDir, `Modelfile_${guildId}`);
-      const modelfileContent = `FROM ${this.config.baseModel}
-
-# Fine-tuned on Discord server messages
-TEMPLATE """{{ .Prompt }}"""
-
-# Training data
-ADAPTER ${trainingFilePath}
-
-# Parameters for conversation
-PARAMETER temperature 0.8
-PARAMETER top_p 0.9
-PARAMETER stop "<|endoftext|>"
-`;
-
-      writeFileSync(modelfilePath, modelfileContent);
 
       // Create the fine-tuned model
       console.log(`Creating fine-tuned model ${this.currentModel}...`);
 
-      // Note: This creates a new model based on the base model
-      // In practice, true fine-tuning requires external tools
-      // This approach creates a custom model with adjusted parameters
-      const modelfile = `FROM ${this.config.baseModel}
+      // Ollama JS library doesn't support inline modelfile creation well
+      // Use the API fields instead
+      const truncatedTrainingData = trainingData.slice(0, 50000);
 
-SYSTEM """You are a Discord bot. You've learned from the following conversation history in this server. Respond naturally and consistently with the tone and style you've observed:
-
-${trainingData.slice(0, 50000)}"""
-
-PARAMETER temperature 0.8
-PARAMETER top_p 0.9
-`;
-
-      const tempModelfilePath = join(dataDir, `Modelfile_temp`);
-      writeFileSync(tempModelfilePath, modelfile);
-
-      // Create model using Ollama
       await this.ollama.create({
         model: this.currentModel,
-        path: tempModelfilePath,
-        stream: false,
+        from: this.config.baseModel,
+        system: `You are a Discord bot. You've learned from the following conversation history in this server. Respond naturally and consistently with the tone and style you've observed:\n\n${truncatedTrainingData}`,
+        parameters: {
+          temperature: 0.8,
+          top_p: 0.9,
+        },
       });
 
       console.log(`Model ${this.currentModel} created successfully`);

@@ -121,7 +121,9 @@ export class LLMPlugin implements BotPlugin {
       }
 
       // Show typing indicator
-      await message.channel.sendTyping();
+      if ('sendTyping' in message.channel) {
+        await message.channel.sendTyping();
+      }
 
       const botUsername = this.client?.user?.username || "Bot";
       const response = await this.llmService.generateResponse(
