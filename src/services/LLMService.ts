@@ -41,19 +41,35 @@ export class LLMService {
         .map(msg => `${msg.username}: ${msg.content}`)
         .join('\n');
 
-      const prompt = `${contextMessages}\n${currentMessage}`;
+      const systemPrompt = `You are ${botUsername}, a Discord bot participating in a conversation. Based on the conversation history below, respond naturally and conversationally as ${botUsername} would. Keep responses concise (1-2 sentences max), relevant, and in the same tone as the conversation. Don't be overly formal or repetitive.`;
+
+      const prompt = `${systemPrompt}\n\nConversation history:\n${contextMessages}\n${currentMessage}\n\n${botUsername}:`;
 
       const response = await this.ollama.generate({
         model: this.currentModel,
         prompt: prompt,
         stream: false,
         options: {
-          temperature: 0.8,
+          temperature: 0.7,
           top_p: 0.9,
+          max_tokens: 150,
         }
       });
 
-      return response.response.trim();
+      // Clean up response and limit length
+      let cleanedResponse = response.response.trim();
+
+      // Remove any potential username prefix if the model added it
+      if (cleanedResponse.startsWith(`${botUsername}:`)) {
+        cleanedResponse = cleanedResponse.substring(botUsername.length + 1).trim();
+      }
+
+      // Limit to 2000 chars (Discord limit)
+      if (cleanedResponse.length > 2000) {
+        cleanedResponse = cleanedResponse.substring(0, 1997) + '...';
+      }
+
+      return cleanedResponse;
     } catch (error) {
       console.error('Error generating LLM response:', error);
       throw error;
@@ -67,24 +83,26 @@ export class LLMService {
         mkdirSync(dataDir, { recursive: true });
       }
 
-      // Format messages as training data
-      const trainingData = this.formatMessagesForTraining(messages);
+      console.log(`Processing ${messages.length} messages for training...`);
+
+      // Filter and prepare quality training data
+      const qualityMessages = this.filterQualityMessages(messages);
+      console.log(`Filtered to ${qualityMessages.length} quality messages`);
+
+      // Create conversation examples for training
+      const conversationExamples = this.createConversationExamples(qualityMessages);
+      console.log(`Created ${conversationExamples.length} conversation examples`);
+
+      // Build comprehensive training prompt
+      const trainingPrompt = this.buildTrainingPrompt(conversationExamples, qualityMessages);
 
       // Create the fine-tuned model
       console.log(`Creating fine-tuned model ${this.currentModel}...`);
 
-      // Ollama JS library doesn't support inline modelfile creation well
-      // Use the API fields instead
-      const truncatedTrainingData = trainingData.slice(0, 50000);
-
       await this.ollama.create({
         model: this.currentModel,
         from: this.config.baseModel,
-        system: `You are a Discord bot. You've learned from the following conversation history in this server. Respond naturally and consistently with the tone and style you've observed:\n\n${truncatedTrainingData}`,
-        parameters: {
-          temperature: 0.8,
-          top_p: 0.9,
-        },
+        system: trainingPrompt,
       });
 
       console.log(`Model ${this.currentModel} created successfully`);
@@ -92,6 +110,115 @@ export class LLMService {
       console.error('Error fine-tuning model:', error);
       throw error;
     }
+  }
+
+  private filterQualityMessages(messages: StoredMessage[]): StoredMessage[] {
+    return messages.filter(msg => {
+      // Filter out low-quality messages
+      if (!msg.content || msg.content.length < 3) return false;
+
+      // Filter out pure command spam
+      if (msg.content.startsWith('!') && msg.content.length < 20) return false;
+
+      // Filter out pure URLs
+      if (msg.content.startsWith('http') && !msg.content.includes(' ')) return false;
+
+      // Filter out pure emoji spam (more than 80% emojis)
+      const emojiRegex = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
+      const emojiCount = (msg.content.match(emojiRegex) || []).length;
+      if (emojiCount > msg.content.length * 0.8) return false;
+
+      return true;
+    });
+  }
+
+  private createConversationExamples(messages: StoredMessage[]): string[] {
+    const examples: string[] = [];
+    const conversationWindow = 5; // Look at groups of 5 messages
+
+    for (let i = 0; i < messages.length - conversationWindow; i++) {
+      const window = messages.slice(i, i + conversationWindow);
+
+      // Create a context -> response pair
+      const context = window.slice(0, -1).map(m => `${m.username}: ${m.content}`).join('\n');
+      const response = window[window.length - 1];
+
+      // Only include if response is substantive
+      if (response.content.length > 10) {
+        examples.push(`Context:\n${context}\n\nResponse:\n${response.username}: ${response.content}`);
+      }
+    }
+
+    // Sample up to 100 best examples to keep training focused
+    return this.sampleBestExamples(examples, 100);
+  }
+
+  private sampleBestExamples(examples: string[], maxCount: number): string[] {
+    if (examples.length <= maxCount) return examples;
+
+    // Sample evenly across the entire conversation history
+    const step = Math.floor(examples.length / maxCount);
+    const sampled: string[] = [];
+
+    for (let i = 0; i < examples.length && sampled.length < maxCount; i += step) {
+      sampled.push(examples[i]);
+    }
+
+    return sampled;
+  }
+
+  private buildTrainingPrompt(examples: string[], allMessages: StoredMessage[]): string {
+    // Analyze conversation style
+    const usernames = new Set(allMessages.map(m => m.username));
+    const avgLength = allMessages.reduce((sum, m) => sum + m.content.length, 0) / allMessages.length;
+
+    // Extract common topics/themes (simple keyword extraction)
+    const commonWords = this.extractCommonThemes(allMessages);
+
+    const examplesText = examples.slice(0, 50).join('\n\n---\n\n');
+
+    return `You are a Discord bot that has learned from ${allMessages.length} messages in a server with ${usernames.size} users.
+
+CONVERSATION STYLE:
+- Messages are typically ${Math.round(avgLength)} characters long
+- Common topics: ${commonWords.slice(0, 10).join(', ')}
+- Tone: Casual, conversational Discord chat
+- Use natural language, abbreviations, and Discord culture
+
+LEARNED BEHAVIORS:
+- Keep responses concise (1-3 sentences max)
+- Match the energy and tone of the conversation
+- Don't repeat yourself or be overly formal
+- Be helpful but not verbose
+- Use humor and personality when appropriate
+
+EXAMPLE CONVERSATIONS FROM THIS SERVER:
+${examplesText}
+
+When responding, think about what would fit naturally in this server's conversation style. Be authentic, concise, and contextually aware.`;
+  }
+
+  private extractCommonThemes(messages: StoredMessage[]): string[] {
+    // Simple word frequency analysis
+    const wordCounts = new Map<string, number>();
+    const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'it', 'this', 'that', 'i', 'you', 'he', 'she', 'we', 'they']);
+
+    messages.forEach(msg => {
+      const words = msg.content.toLowerCase()
+        .replace(/[^\w\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 3 && !stopWords.has(w) && !w.startsWith('http'));
+
+      words.forEach(word => {
+        wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+      });
+    });
+
+    // Sort by frequency and return top words
+    return Array.from(wordCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+      .map(([word]) => word);
   }
 
   private formatMessagesForTraining(messages: StoredMessage[]): string {

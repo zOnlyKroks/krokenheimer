@@ -106,6 +106,15 @@ export class MessageDatabase {
     return result.count;
   }
 
+  public getTotalMessageCount(): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM messages
+    `);
+
+    const result = stmt.get() as { count: number };
+    return result.count;
+  }
+
   public close(): void {
     this.db.close();
   }

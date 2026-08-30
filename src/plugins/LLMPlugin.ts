@@ -43,6 +43,12 @@ export class LLMPlugin implements BotPlugin {
       aliases: ["llmstats"],
       execute: this.showStats.bind(this),
     },
+    {
+      name: "scan",
+      description: "Scan historical messages from all servers",
+      aliases: ["rescan"],
+      execute: this.scanCommand.bind(this),
+    },
   ];
 
   async initialize(client: Client, bot: ExtensibleBot): Promise<void> {
@@ -101,15 +107,17 @@ export class LLMPlugin implements BotPlugin {
   private shouldRespondToMessage(message: Message): boolean {
     if (!this.client?.user) return false;
 
+    // Don't respond to commands (messages starting with !)
+    if (message.content.startsWith('!')) return false;
+
     // Always respond if bot is mentioned
     if (message.mentions.has(this.client.user.id)) {
       return true;
     }
 
-    // Always respond if replying to bot
-    if (message.reference?.messageId) {
-      // Check if referenced message is from bot (would need to fetch, simplified here)
-      return true;
+    // Don't randomly respond to short messages or URLs
+    if (message.content.length < 10 || message.content.startsWith('http')) {
+      return false;
     }
 
     // Random chance response
@@ -311,9 +319,32 @@ The bot will respond when:
 • ${randomChancePercent}% random chance on any message
 
 Use \`!retrain\` to fine-tune with stored messages (min 100 messages)
+Use \`!scan\` to scan historical messages from all servers
     `;
 
     await message.reply(statsText);
+  }
+
+  private async scanCommand(message: Message): Promise<void> {
+    await message.reply("🔍 Starting manual message scan... This may take a while. Check console for progress.");
+
+    try {
+      const startTime = Date.now();
+      await this.scanAllHistoricalMessages();
+      const duration = Math.round((Date.now() - startTime) / 1000);
+
+      const totalMessages = this.messageDb.getTotalMessageCount();
+      const guildMessages = message.guild ? this.messageDb.getMessageCount(message.guild.id) : 0;
+
+      await message.reply(
+        `✅ Scan complete! Took ${duration} seconds.\n**Total messages:** ${totalMessages}\n**This server:** ${guildMessages}`
+      );
+    } catch (error) {
+      console.error("Error during manual scan:", error);
+      await message.reply(
+        `❌ Scan failed: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
+    }
   }
 
   async cleanup(): Promise<void> {
