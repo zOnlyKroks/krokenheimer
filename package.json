@@ -8,7 +8,7 @@
     "node": "22"
   },
   "scripts": {
-    "dev": "tsc && /opt/homebrew/opt/node@22/bin/node dist/index.js",
+    "dev": "tsc && node dist/index.js",
     "dev:watch": "tsc --watch",
     "build": "tsc",
     "start": "/opt/homebrew/opt/node@22/bin/node dist/index.js",

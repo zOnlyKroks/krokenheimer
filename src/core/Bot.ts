@@ -1,7 +1,6 @@
 import { Client, GatewayIntentBits, Message } from "discord.js";
 import type { BotPlugin, BotCommand, BotConfig } from "../types/index.ts";
 import { Logger } from "./util/logger.js";
-import trainingConfig from "../config/trainingConfig.js";
 
 export class ExtensibleBot {
   private client: Client;
@@ -28,11 +27,6 @@ export class ExtensibleBot {
   private setupEventHandlers(): void {
     this.client.once("ready", () => {
       this.logger.info(`✅ Bot logged in as ${this.client.user?.tag}`);
-
-      // Set bot user ID for training filter
-      if (this.client.user) {
-        trainingConfig.setBotUserId(this.client.user.id);
-      }
     });
 
     this.client.on("messageCreate", async (message) => {
@@ -131,31 +125,6 @@ export class ExtensibleBot {
       this.logger.info(`✅ Plugin ${plugin.name} loaded successfully`);
     } catch (error) {
       this.logger.error(`Failed to load plugin ${plugin.name}:`, error);
-      throw error;
-    }
-  }
-
-  public async unloadPlugin(pluginName: string): Promise<void> {
-    const plugin = this.plugins.get(pluginName);
-    if (!plugin) {
-      throw new Error(`Plugin ${pluginName} not found`);
-    }
-
-    try {
-      // Cleanup plugin
-      if (plugin.cleanup) {
-        await plugin.cleanup();
-      }
-
-      // Unregister commands
-      for (const command of plugin.commands) {
-        this.commands.delete(command.name);
-      }
-
-      this.plugins.delete(pluginName);
-      this.logger.info(`✅ Plugin ${pluginName} unloaded successfully`);
-    } catch (error) {
-      this.logger.error(`Failed to unload plugin ${pluginName}:`, error);
       throw error;
     }
   }
